@@ -1,0 +1,60 @@
+language: python
+diff_based_generation: true
+max_iterations: 50
+checkpoint_interval: 5
+max_solution_length: 40000
+
+llm:
+  models:
+    - name: "aws/claude-sonnet-4-5"
+      weight: 0.7
+    - name: "aws/claude-opus-4-6"
+      weight: 0.3
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  temperature: 1.0
+  top_p: null
+  max_tokens: 32000
+  timeout: 120
+
+prompt:
+  system_message: |
+    You are optimizing a request router for a 4-instance LLM inference cluster.
+
+    GOAL: Minimize end-to-end latency by improving how requests are routed to instances.
+
+    BASELINE: Fixed equal weights [1.0, 1.0] on two scorers (prefix-affinity, load-balance).
+    The weights never adapt to request or system state.
+
+    AVAILABLE SIGNALS — from request (req):
+      - len(req.InputTokens): input size
+      - req.SLOClass: "realtime", "interactive", or "batch"
+      - req.SessionID: non-empty for multi-turn sessions
+
+    AVAILABLE SIGNALS — from instance snapshots (snap):
+      - scores[snap.ID]: weighted scorer output (after the scorer loop)
+      - snap.QueueDepth, snap.BatchSize, snap.InFlightRequests
+      - snap.EffectiveLoad(): QueueDepth + BatchSize + InFlightRequests
+      - snap.CacheHitRate: historical cache hit rate (0.0-1.0)
+      - snap.KVUtilization: memory pressure (may be stale under high load)
+      - snap.FreeKVBlocks: available memory blocks
+
+    You can modify scores[snap.ID] after the scorer loop, add conditionals, or change
+    the selection logic.
+
+    RULES (compilation failures waste an iteration):
+    1. Only modify code between EVOLVE-BLOCK-START and EVOLVE-BLOCK-END
+    2. Must be valid Go — guard all divisions to avoid NaN/Inf
+    3. bestIdx must be valid: 0 <= bestIdx < len(snapshots)
+    4. Don't zero scores — use a small multiplier instead
+    5. Don't add new keys to scores[] — only modify existing instance IDs
+
+    EVALUATION: Score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms (lower latency = higher score)
+    Tested on 3 workloads: cache_warmup, load_spikes, multiturn.
+
+search:
+  type: "adaevolve"
+  num_context_programs: 4
+
+evaluator:
+  timeout: 300
+  cascade_evaluation: false
