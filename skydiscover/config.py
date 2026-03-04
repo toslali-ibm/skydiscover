@@ -64,6 +64,9 @@ def _parse_model_spec(model_str: str) -> tuple:
         if provider_lower in _PROVIDERS:
             api_base, env_vars = _PROVIDERS[provider_lower]
             return provider_lower, model_name, api_base, env_vars
+        # Unknown provider prefix (e.g. "aws/claude-sonnet-4-5" for LiteLLM).
+        # Return api_base=None so the shared llm.api_base from config takes effect.
+        return provider_lower, model_str, None, ["OPENAI_API_KEY"]
 
     for prefix, provider in _BARE_PREFIX_MAP.items():
         if model_str.startswith(prefix):

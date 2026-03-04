@@ -54,7 +54,8 @@ prompt:
 search:
   type: "adaevolve"
   num_context_programs: 4
-  random_seed: 42
+  database:
+    random_seed: 42
 
 evaluator:
   timeout: 300
