@@ -1,2 +1,4 @@
 baseline_metrics.json
 simulation_worker
+.eval_artifacts/
+__pycache__/

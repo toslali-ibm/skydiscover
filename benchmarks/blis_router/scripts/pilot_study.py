@@ -11,15 +11,19 @@ Tests:
   3. Go build with extracted code
   4. Full evaluation (3 workloads) with baseline program
   5. Score sanity checks (finite, negative, all workloads succeed)
+  6. Experiment isolation (routing.go restored, no artifacts in benchmark dir)
 
 Usage:
   python benchmarks/blis_router/scripts/pilot_study.py
 """
 
-import json
+import hashlib
 import logging
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # Resolve paths relative to benchmark root
@@ -40,6 +44,11 @@ def check(condition: bool, msg: str):
     print(f"  [{status}] {msg}")
     if not condition:
         raise AssertionError(msg)
+
+
+def file_hash(path: Path) -> str:
+    """MD5 hash of file content."""
+    return hashlib.md5(path.read_bytes()).hexdigest()
 
 
 def test_go_code_extraction():
@@ -107,44 +116,82 @@ def test_full_evaluation():
     print("\n--- Test 4: Full Evaluation ---")
     from evaluator import evaluate
 
-    # Remove cached baseline to force fresh computation
-    cache_path = BENCHMARK_DIR / "baseline_metrics.json"
-    if cache_path.exists():
-        cache_path.unlink()
+    # Use a temp directory for evaluation artifacts (not benchmark dir)
+    eval_output_dir = tempfile.mkdtemp(prefix="blis_pilot_")
+    os.environ["BLIS_OUTPUT_DIR"] = eval_output_dir
 
-    result = evaluate(str(BENCHMARK_DIR / "initial_program.py"))
+    try:
+        result = evaluate(str(BENCHMARK_DIR / "initial_program.py"))
 
-    score = result.get("combined_score")
-    avg_e2e = result.get("avg_e2e_ms")
-    avg_p95 = result.get("avg_p95_ms")
-    success_rate = result.get("success_rate")
-    error = result.get("error")
+        score = result.get("combined_score")
+        avg_e2e = result.get("avg_e2e_ms")
+        avg_p95 = result.get("avg_p95_ms")
+        success_rate = result.get("success_rate")
+        error = result.get("error")
 
-    check(error is None, f"No error (got: {error})")
-    check(isinstance(score, (int, float)), f"Score is numeric: {score}")
-    check(score != float("-inf") and score != float("inf"), "Score is finite")
-    check(score < 0, f"Score is negative (latency-based): {score:.2f}")
-    check(score > -100000, f"Score is not error sentinel: {score:.2f}")
+        check(error is None, f"No error (got: {error})")
+        check(isinstance(score, (int, float)), f"Score is numeric: {score}")
+        check(score != float("-inf") and score != float("inf"), "Score is finite")
+        check(score < 0, f"Score is negative (latency-based): {score:.2f}")
+        check(score > -100000, f"Score is not error sentinel: {score:.2f}")
 
-    print("\n--- Test 5: Score Sanity ---")
-    check(success_rate == 1.0, f"All 3 workloads succeeded (rate={success_rate})")
-    check(isinstance(avg_e2e, (int, float)) and avg_e2e > 0, f"Avg E2E positive: {avg_e2e:.2f}ms")
-    check(isinstance(avg_p95, (int, float)) and avg_p95 > 0, f"Avg P95 positive: {avg_p95:.2f}ms")
-    check(avg_p95 >= avg_e2e, f"P95 >= mean (tail >= avg): {avg_p95:.2f} >= {avg_e2e:.2f}")
+        print("\n--- Test 5: Score Sanity ---")
+        check(success_rate == 1.0, f"All 3 workloads succeeded (rate={success_rate})")
+        check(isinstance(avg_e2e, (int, float)) and avg_e2e > 0, f"Avg E2E positive: {avg_e2e:.2f}ms")
+        check(isinstance(avg_p95, (int, float)) and avg_p95 > 0, f"Avg P95 positive: {avg_p95:.2f}ms")
+        check(avg_p95 >= avg_e2e, f"P95 >= mean (tail >= avg): {avg_p95:.2f} >= {avg_e2e:.2f}")
 
-    # Check per-workload results
-    for wl in ["cache_warmup", "load_spikes", "multiturn"]:
-        wl_e2e = result.get(f"{wl}_e2e_ms")
-        check(wl_e2e is not None and wl_e2e > 0, f"{wl} e2e_ms: {wl_e2e:.2f}ms")
+        # Check per-workload results
+        for wl in ["cache_warmup", "load_spikes", "multiturn"]:
+            wl_e2e = result.get(f"{wl}_e2e_ms")
+            check(wl_e2e is not None and wl_e2e > 0, f"{wl} e2e_ms: {wl_e2e:.2f}ms")
 
-    # Check baseline was cached
-    check(cache_path.exists(), "Baseline metrics cached to disk")
+        # Check baseline was cached in output dir (NOT benchmark dir)
+        baseline_in_output = Path(eval_output_dir) / "baseline_metrics.json"
+        check(baseline_in_output.exists(), f"Baseline cached in output dir: {eval_output_dir}")
 
-    print(f"\n  Baseline score: {score:.2f}")
-    print(f"  Avg E2E: {avg_e2e:.2f}ms")
-    print(f"  Avg P95: {avg_p95:.2f}ms")
+        print(f"\n  Baseline score: {score:.2f}")
+        print(f"  Avg E2E: {avg_e2e:.2f}ms")
+        print(f"  Avg P95: {avg_p95:.2f}ms")
 
-    return result
+        return result
+
+    finally:
+        # Cleanup temp dir
+        shutil.rmtree(eval_output_dir, ignore_errors=True)
+        os.environ.pop("BLIS_OUTPUT_DIR", None)
+
+
+def test_isolation():
+    """Test 6: Experiment isolation — routing.go restored, no artifacts leaked."""
+    print("\n--- Test 6: Experiment Isolation ---")
+    routing_go = INFERENCE_SIM_DIR / "sim" / "routing.go"
+
+    # Record state before evaluation
+    hash_before = file_hash(routing_go)
+
+    # Run an evaluation with output directed to temp dir
+    eval_output_dir = tempfile.mkdtemp(prefix="blis_isolation_")
+    os.environ["BLIS_OUTPUT_DIR"] = eval_output_dir
+
+    try:
+        from evaluator import evaluate
+        evaluate(str(BENCHMARK_DIR / "initial_program.py"))
+    finally:
+        shutil.rmtree(eval_output_dir, ignore_errors=True)
+        os.environ.pop("BLIS_OUTPUT_DIR", None)
+
+    # Verify routing.go is restored
+    hash_after = file_hash(routing_go)
+    check(hash_before == hash_after, "routing.go restored after evaluation (no mutation)")
+
+    # Verify no baseline_metrics.json leaked into benchmark dir
+    leaked_baseline = BENCHMARK_DIR / "baseline_metrics.json"
+    check(not leaked_baseline.exists(), "No baseline_metrics.json in benchmark dir")
+
+    # Verify no .eval_artifacts leaked
+    leaked_artifacts = BENCHMARK_DIR / ".eval_artifacts"
+    check(not leaked_artifacts.exists(), "No .eval_artifacts in benchmark dir")
 
 
 def main():
@@ -152,11 +199,23 @@ def main():
     print("BLIS Router Pilot Study")
     print("=" * 60)
 
+    # Clean any leftover artifacts before starting
+    for artifact in [
+        BENCHMARK_DIR / "baseline_metrics.json",
+        BENCHMARK_DIR / ".eval_artifacts",
+    ]:
+        if artifact.exists():
+            if artifact.is_dir():
+                shutil.rmtree(artifact)
+            else:
+                artifact.unlink()
+
     try:
         go_code = test_go_code_extraction()
         test_evolve_block(go_code)
         test_go_build(go_code)
         result = test_full_evaluation()
+        test_isolation()
 
         print("\n" + "=" * 60)
         print("ALL TESTS PASSED")
