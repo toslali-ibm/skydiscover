@@ -81,6 +81,18 @@ def _map_config(config: Config, iterations: Optional[int], output_dir: str):
             }
         )
 
+    # Propagate top_p from SkyDiscover config (None means "don't send top_p")
+    if config.llm.top_p is None:
+        oe.llm.top_p = None
+        for m in oe.llm.models + oe.llm.evaluator_models:
+            m.top_p = None
+    elif config.llm.top_p is not None:
+        oe.llm.top_p = config.llm.top_p
+
+    # Max code length
+    if config.max_solution_length:
+        oe.max_code_length = config.max_solution_length
+
     # LLM timeout
     if config.llm.timeout:
         oe.llm.timeout = config.llm.timeout
