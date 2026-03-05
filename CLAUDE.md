@@ -134,11 +134,15 @@ When running BLIS router experiments, Claude sessions MUST follow these rules:
    - No artifacts leaked to benchmark directory
    - Results exist in the expected output directory
 
-### Mandatory Post-experiment
+### Mandatory Post-experiment (run ALL steps — even when adding one framework to an existing experiment)
 
 8. **Record configuration**: Save seed, iterations, model, inference-sim commit hash with results
-9. **Run comparison**: `python benchmarks/blis_router/scripts/compare_results.py <output_dir>`
-10. **Plot accuracy results**: `python benchmarks/blis_router/scripts/plot_results.py <output_dir>` (saves PNGs to `<output_dir>/plots/`). Plots include baseline as a bar and annotate each framework bar with % improvement vs baseline.
-11. **Run effort/cost analysis**: `python benchmarks/blis_router/scripts/analyze_effort.py <output_dir>` — produces effort metrics table, CSV, JSON, and plots (iteration duration boxplot, convergence curves, effort-vs-improvement scatter, search efficiency bar chart). See [Post-Experiment Analysis](docs/experiments/blis-router.md#post-experiment-analysis) for full details.
-12. **Write `analysis.md`** in output dir with both accuracy AND effort/cost results: accuracy tables, effort summary (wall time, iteration times, population size, diversity), search efficiency (%/min), convergence behavior, population quality, and key accuracy-vs-cost takeaways. See `outputs/blis_router/20260304_182612/analysis.md` as the reference template.
-13. **Never delete output directories** — they are the permanent experimental record
+9. **Run ALL three analysis scripts** (produces 7 plots + CSV + JSON):
+   ```bash
+   RESULTS_DIR="outputs/blis_router/<YYYYMMDD_HHMMSS>"
+   python benchmarks/blis_router/scripts/compare_results.py "$RESULTS_DIR"
+   python benchmarks/blis_router/scripts/plot_results.py "$RESULTS_DIR"
+   python benchmarks/blis_router/scripts/analyze_effort.py "$RESULTS_DIR"
+   ```
+10. **Write or update `analysis.md`** in output dir. Use `effort_analysis.json` for accurate numbers. Must include: accuracy tables, % improvement, effort summary (iters, wall time, iteration times, pop size, diversity), search efficiency (%/min), convergence, population quality, key takeaways, experiment config. **CRITICAL**: When adding a framework to an existing experiment, update ALL tables — do not leave stale data. See [blis-router.md](docs/experiments/blis-router.md#after-experiments-run-all-steps--even-when-adding-one-framework-to-an-existing-experiment) for full checklist and `outputs/blis_router/20260304_182612/analysis.md` as reference.
+11. **Never delete output directories** — they are the permanent experimental record

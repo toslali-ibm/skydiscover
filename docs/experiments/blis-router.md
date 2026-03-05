@@ -129,22 +129,45 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
    - No `__pycache__` in the benchmark directory
    - Results exist in the expected output directory
 
-### After Experiments
+### After Experiments (run ALL steps — even when adding one framework to an existing experiment)
 
-8. Run `python benchmarks/blis_router/scripts/compare_results.py <output_dir>` to generate comparison tables.
-9. Run `python benchmarks/blis_router/scripts/plot_results.py <output_dir>` to generate accuracy plots (saved to `<output_dir>/plots/`). Plots include a baseline bar and annotate each framework with % improvement vs baseline. Reads `baseline_metrics.json` from the first framework subdirectory.
-10. Run `python benchmarks/blis_router/scripts/analyze_effort.py <output_dir>` to generate effort/cost analysis (see [Post-Experiment Analysis](#post-experiment-analysis) below).
-11. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
-12. **Write `analysis.md`** in the output directory summarizing both accuracy AND effort/cost results. It must include:
-    - Accuracy comparison table (scores, % improvement vs baseline)
-    - Effort summary table (iterations, wall time, avg/median iteration time, population size, unique scores, generation depth)
+8. Run **all three** analysis scripts in order:
+   ```bash
+   RESULTS_DIR="outputs/blis_router/<YYYYMMDD_HHMMSS>"
+   python benchmarks/blis_router/scripts/compare_results.py "$RESULTS_DIR"
+   python benchmarks/blis_router/scripts/plot_results.py "$RESULTS_DIR"
+   python benchmarks/blis_router/scripts/analyze_effort.py "$RESULTS_DIR"
+   ```
+   This produces **7 plots** in `<RESULTS_DIR>/plots/`:
+   - `combined_scores.png` — bar chart of combined score per framework + baseline
+   - `latency_comparison.png` — grouped bars for avg E2E vs avg P95
+   - `per_workload_latency.png` — per-workload E2E breakdown
+   - `iteration_duration_boxplot.png` — box plot of iteration durations
+   - `convergence_curves.png` — best score over iterations (line chart)
+   - `effort_vs_improvement.png` — scatter: wall time vs improvement (bubble = population)
+   - `search_efficiency.png` — bar chart: % improvement per wall-clock minute
+
+   Plus: `comparison_table.csv`, `effort_analysis.csv`, `effort_analysis.json`
+
+9. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
+10. **Write or update `analysis.md`** in the output directory. Use data from the scripts above (especially `effort_analysis.json`). It MUST include ALL of:
+    - Accuracy comparison table (scores, % improvement vs baseline) — **all frameworks including any newly added**
+    - % improvement vs baseline table
+    - Key findings
+    - Convergence comparison (20-iter vs 100-iter scores, if both exist)
+    - Best iteration found per framework
+    - Effort summary table (iterations, wall time, avg/median/min/max/stddev iteration time, population size, unique scores, diversity ratio, generation depth)
     - Search efficiency table (% improvement per wall-clock minute)
-    - Convergence observations (iterations to best, % wasted compute)
+    - Convergence behavior (iterations to best, % wasted compute)
     - AdaEvolve island details (if applicable)
-    - Population quality comparison (spread, diversity ratio)
+    - Population quality comparison (pop size, best/median/worst scores, spread)
     - Key takeaways comparing accuracy vs cost tradeoffs
-    - Experiment configuration (seed, model, inference-sim commit)
-13. Do NOT delete or modify output directories — they are the permanent record.
+    - Experiment configuration (seed, model, api_base, temperature, inference-sim commit)
+    - Reference template: `outputs/blis_router/20260304_182612/analysis.md`
+
+    **CRITICAL**: When adding a framework to an existing experiment, update ALL tables and findings in `analysis.md` — do not leave stale data from before the new framework was added.
+
+11. Do NOT delete or modify output directories — they are the permanent record.
 
 ## Scoring
 
