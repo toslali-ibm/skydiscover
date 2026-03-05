@@ -52,8 +52,12 @@ uv sync                       # one-time: install project deps
 cd benchmarks/blis_router/inference-sim && git diff sim/routing.go  # must be empty
 ls benchmarks/blis_router/baseline_metrics.json 2>/dev/null         # must not exist
 
-# 3. Run a single framework (replace FRAMEWORK and ITERATIONS)
-export BLIS_OUTPUT_DIR="outputs/blis_router/<EXPERIMENT_DIR>/<FRAMEWORK>"
+# 3. Name the experiment: <YYMMDD>_<N>i_<tag>  (e.g., 260305_100i_seed42)
+#    YYMMDD = today's date, N = iterations, tag = short unique id
+EXPERIMENT="$(date +%y%m%d)_<N>i_<TAG>"
+
+# 4. Run a single framework
+export BLIS_OUTPUT_DIR="outputs/blis_router/${EXPERIMENT}/<FRAMEWORK>"
 export BLIS_SEED="42"
 mkdir -p "$BLIS_OUTPUT_DIR"
 uv run skydiscover-run \
@@ -65,12 +69,10 @@ uv run skydiscover-run \
   -o "$BLIS_OUTPUT_DIR" \
   -l INFO
 
-# 4. Post-run verification
+# 5. Post-run verification
 cd benchmarks/blis_router/inference-sim && git diff sim/routing.go  # must be empty
 ls benchmarks/blis_router/baseline_metrics.json 2>/dev/null         # must not exist
 ```
-
-**Experiment naming**: `outputs/blis_router/<YYMMDD>_<N>i_<tag>/` — e.g., `260304_100i_seed42`. Always include date, iteration count, and a short unique tag. See [blis-router.md](docs/experiments/blis-router.md#naming-convention) for full convention.
 
 **Available frameworks**: `adaevolve`, `evox`, `openevolve_native`, `gepa_native`, `topk`, `best_of_n`, `beam_search`
 
