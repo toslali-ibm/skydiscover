@@ -132,8 +132,9 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 ### After Experiments
 
 8. Run `python benchmarks/blis_router/scripts/compare_results.py <output_dir>` to generate comparison tables.
-9. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
-10. Do NOT delete or modify output directories — they are the permanent record.
+9. Run `python benchmarks/blis_router/scripts/plot_results.py <output_dir>` to generate plots (saved to `<output_dir>/plots/`). Plots include a baseline bar and annotate each framework with % improvement vs baseline. Reads `baseline_metrics.json` from the first framework subdirectory.
+10. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
+11. Do NOT delete or modify output directories — they are the permanent record.
 
 ## Scoring
 
@@ -157,6 +158,9 @@ score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms
 
 | Problem | Solution |
 |---------|----------|
+| `uv` not found | Run `pip3 install uv` to install it |
+| `Provider 'aws' requires api_base` | Do NOT use `-m` flag — models are defined in config.yaml with api_base |
+| EvoX 401 on label generation (`gpt-5-mini`) | Fixed: `search/evox/controller.py` now propagates parent LLM config to the search controller. The root cause was that EvoX's internal `search.yaml` defaults to OpenAI models/api_base, and these weren't overridden by the user's config. |
 | `go build` fails | Check Go version, run `go version`. Ensure inference-sim submodule is initialized. |
 | All workloads fail | Check `stderr` in workload results. Usually a Go compilation error in evolved code. |
 | Score is -100000 | Error sentinel — check `error` and `artifacts.error_type` in result dict. |

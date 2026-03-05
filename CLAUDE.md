@@ -20,7 +20,7 @@ SkyDiscover is a modular framework for AI-driven scientific and algorithmic disc
 ## Key Commands
 
 ```bash
-# Install
+# Install (uv must be available — install with: pip3 install uv)
 uv sync
 
 # Run a benchmark
@@ -38,6 +38,45 @@ uv sync --extra external      # external backends (OpenEvolve, GEPA, ShinkaEvolv
 # BLIS router pilot study (validates entire pipeline)
 python benchmarks/blis_router/scripts/pilot_study.py
 ```
+
+## Quick-Start: Run a BLIS Router Experiment
+
+When asked to run a BLIS router experiment, use this exact recipe. **Do NOT use the `-m` flag** — the config.yaml already specifies models with the correct api_base.
+
+```bash
+# 1. Ensure uv is installed (check: which uv)
+pip3 install uv 2>/dev/null  # no-op if already installed
+uv sync                       # one-time: install project deps
+
+# 2. Pre-flight checks (mandatory)
+cd benchmarks/blis_router/inference-sim && git diff sim/routing.go  # must be empty
+ls benchmarks/blis_router/baseline_metrics.json 2>/dev/null         # must not exist
+
+# 3. Run a single framework (replace FRAMEWORK and ITERATIONS)
+export BLIS_OUTPUT_DIR="outputs/blis_router/<EXPERIMENT_DIR>/<FRAMEWORK>"
+export BLIS_SEED="42"
+mkdir -p "$BLIS_OUTPUT_DIR"
+uv run skydiscover-run \
+  benchmarks/blis_router/initial_program.py \
+  benchmarks/blis_router/evaluator.py \
+  -c benchmarks/blis_router/config.yaml \
+  -s <FRAMEWORK> \
+  -i <ITERATIONS> \
+  -o "$BLIS_OUTPUT_DIR" \
+  -l INFO
+
+# 4. Post-run verification
+cd benchmarks/blis_router/inference-sim && git diff sim/routing.go  # must be empty
+ls benchmarks/blis_router/baseline_metrics.json 2>/dev/null         # must not exist
+```
+
+**Available frameworks**: `adaevolve`, `evox`, `openevolve_native`, `gepa_native`, `topk`, `best_of_n`, `beam_search`
+
+**Common pitfalls**:
+- `uv` not found → `pip3 install uv`
+- `Provider 'aws' requires api_base` → do NOT use `-m` flag; models are in config.yaml
+- EvoX 401 errors on label generation → fixed in `search/evox/controller.py` (propagates parent LLM config to search controller). If this recurs, the search controller's LLM config is being loaded from `search/evox/config/search.yaml` which defaults to OpenAI — the fix is to propagate `self.config.llm` to `controller_input.config.llm` in `_init_search_evolution_controller()`.
+- Experiments take ~30s per iteration (LLM call + Go build + 3 workload simulations)
 
 ## Project Structure (top-level)
 
@@ -99,4 +138,5 @@ When running BLIS router experiments, Claude sessions MUST follow these rules:
 
 8. **Record configuration**: Save seed, iterations, model, inference-sim commit hash with results
 9. **Run comparison**: `python benchmarks/blis_router/scripts/compare_results.py <output_dir>`
-10. **Never delete output directories** — they are the permanent experimental record
+10. **Plot results**: `python benchmarks/blis_router/scripts/plot_results.py <output_dir>` (saves PNGs to `<output_dir>/plots/`). Plots include baseline as a bar and annotate each framework bar with % improvement vs baseline.
+11. **Never delete output directories** — they are the permanent experimental record

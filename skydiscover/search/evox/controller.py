@@ -62,6 +62,16 @@ class CoEvolutionController(DiscoveryController):
             config_path=db_cfg.config_path,
             output_dir=self.config.search.output_dir,
         )
+        # Propagate the parent config's LLM settings (models, api_base, api_key)
+        # to the search controller so it uses the same provider instead of the
+        # EvoX-internal defaults (which default to OpenAI and cause 401 errors).
+        parent_llm = self.config.llm
+        search_llm = controller_input.config.llm
+        search_llm.models = parent_llm.models.copy()
+        search_llm.guide_models = parent_llm.guide_models.copy()
+        search_llm.evaluator_models = parent_llm.evaluator_models.copy()
+        search_llm.api_base = parent_llm.api_base
+        search_llm.api_key = parent_llm.api_key
         self.search_controller = DiscoveryController(controller_input)
         self.search_scorer = LogWindowScorer()
         self._active_search_algorithm_code = self._search_initial_code
