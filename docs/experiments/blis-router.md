@@ -151,7 +151,44 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 4. Run frameworks **sequentially** (adaevolve → evox → openevolve → gepa → shinkaevolve). They share `routing.go` and cannot run in parallel.
 5. Always set `BLIS_OUTPUT_DIR` to the experiment output directory before calling `skydiscover-run`.
 6. Always set `BLIS_SEED` for reproducibility.
-7. After each framework completes, verify:
+7. **Monitor every 2 minutes** while a framework is running. Set up a background `sleep 120` loop and check the framework's log file after each interval. Every update to the user MUST include:
+
+   **Validity check:**
+   - Count of successful evaluations vs build errors vs other failures
+   - Any 401/auth errors, crashes, or unexpected exceptions
+   - Whether the run is still active (new log lines appearing)
+
+   **Progress & improvement:**
+   - Iterations completed / total (e.g., "35/100")
+   - Current best score and % improvement vs baseline (-4278.20)
+   - When the last new best was found (iteration number)
+   - Whether it's still improving or has plateaued
+
+   **Timing stats:**
+   - Elapsed wall time since start
+   - Average seconds per iteration
+   - Estimated time remaining = (total - completed) × avg_iter_time
+
+   **Example monitoring command** (run as background task with `sleep 120`):
+   ```bash
+   LOG=$(ls outputs/blis_router/<EXPERIMENT>/<FRAMEWORK>/logs/*.log 2>/dev/null | head -1)
+   echo "=== PROGRESS ===" && grep -c "Iteration" "$LOG"
+   echo "=== BEST SCORES ===" && grep "best program score" "$LOG" | tail -3
+   echo "=== NEW BESTS ===" && grep "New best" "$LOG" | tail -3
+   echo "=== ERRORS ===" && grep -c "BuildError\|error\|Error" "$LOG"
+   echo "=== LAST LINES ===" && tail -5 "$LOG"
+   ```
+
+   **Format example** for user update:
+   ```
+   Update at ~12 min (iter 35/100):
+   - Validity: 25 successful, 10 build errors, 0 auth errors — healthy
+   - Best: -3920.45 (+8.4% vs baseline), found at iter 28
+   - Timing: 12.3 min elapsed, 34.2s/iter avg, ~37 min remaining
+   - Trend: last improvement 7 iters ago, still exploring
+   ```
+
+8. After each framework completes, verify:
    - `routing.go` is unchanged from the original (evaluator restores it, but verify)
    - No `baseline_metrics.json` in the benchmark directory
    - No `__pycache__` in the benchmark directory

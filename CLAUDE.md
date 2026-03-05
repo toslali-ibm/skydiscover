@@ -133,7 +133,21 @@ When running BLIS router experiments, Claude sessions MUST follow these rules:
 4. **Sequential execution only**: Run frameworks one at a time (adaevolve → evox → openevolve → gepa → shinkaevolve). They share `routing.go` and CANNOT run in parallel.
 5. **Always set `BLIS_OUTPUT_DIR`**: Every experiment's artifacts (baseline, logs) go to its own output directory. NEVER write to the benchmark directory.
 6. **Always set `BLIS_SEED`**: For reproducibility. Default is 42. Record the seed with results.
-7. **Verify isolation after each framework**:
+7. **Monitor every 2 minutes** while a framework is running. Use `sleep 120` in a background task, then check the log and report to the user. Each update MUST include:
+   - **Validity**: any errors in logs? (build failures, 401s, crashes). Count of successful vs failed iterations.
+   - **Progress**: iterations completed / total, best score so far, % improvement vs baseline
+   - **Timing**: elapsed time, avg seconds per iteration, estimated time remaining
+   - **Improvement trend**: when was the last new best found? is it still improving or plateaued?
+
+   Example monitoring command (adapt log path per framework):
+   ```bash
+   LOG=$(ls outputs/blis_router/<EXPERIMENT>/<FRAMEWORK>/logs/*.log | head -1)
+   echo "=== PROGRESS ===" && grep -c "Iteration" "$LOG"
+   echo "=== BEST ===" && grep "best program score" "$LOG" | tail -3
+   echo "=== ERRORS ===" && grep -c "error\|Error\|BUILD FAILED\|BuildError" "$LOG"
+   echo "=== LAST LINES ===" && tail -5 "$LOG"
+   ```
+8. **Verify isolation after each framework**:
    - `routing.go` unchanged (evaluator restores it via try/finally)
    - No artifacts leaked to benchmark directory
    - Results exist in the expected output directory
