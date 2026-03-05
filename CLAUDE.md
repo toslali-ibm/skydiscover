@@ -138,5 +138,7 @@ When running BLIS router experiments, Claude sessions MUST follow these rules:
 
 8. **Record configuration**: Save seed, iterations, model, inference-sim commit hash with results
 9. **Run comparison**: `python benchmarks/blis_router/scripts/compare_results.py <output_dir>`
-10. **Plot results**: `python benchmarks/blis_router/scripts/plot_results.py <output_dir>` (saves PNGs to `<output_dir>/plots/`). Plots include baseline as a bar and annotate each framework bar with % improvement vs baseline.
-11. **Never delete output directories** — they are the permanent experimental record
+10. **Plot accuracy results**: `python benchmarks/blis_router/scripts/plot_results.py <output_dir>` (saves PNGs to `<output_dir>/plots/`). Plots include baseline as a bar and annotate each framework bar with % improvement vs baseline.
+11. **Run effort/cost analysis**: `python benchmarks/blis_router/scripts/analyze_effort.py <output_dir>` — produces effort metrics table, CSV, JSON, and plots (iteration duration boxplot, convergence curves, effort-vs-improvement scatter, search efficiency bar chart). See [Post-Experiment Analysis](docs/experiments/blis-router.md#post-experiment-analysis) for full details.
+12. **Write `analysis.md`** in output dir with both accuracy AND effort/cost results: accuracy tables, effort summary (wall time, iteration times, population size, diversity), search efficiency (%/min), convergence behavior, population quality, and key accuracy-vs-cost takeaways. See `outputs/blis_router/20260304_182612/analysis.md` as the reference template.
+13. **Never delete output directories** — they are the permanent experimental record

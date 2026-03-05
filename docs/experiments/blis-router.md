@@ -132,9 +132,19 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 ### After Experiments
 
 8. Run `python benchmarks/blis_router/scripts/compare_results.py <output_dir>` to generate comparison tables.
-9. Run `python benchmarks/blis_router/scripts/plot_results.py <output_dir>` to generate plots (saved to `<output_dir>/plots/`). Plots include a baseline bar and annotate each framework with % improvement vs baseline. Reads `baseline_metrics.json` from the first framework subdirectory.
-10. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
-11. Do NOT delete or modify output directories — they are the permanent record.
+9. Run `python benchmarks/blis_router/scripts/plot_results.py <output_dir>` to generate accuracy plots (saved to `<output_dir>/plots/`). Plots include a baseline bar and annotate each framework with % improvement vs baseline. Reads `baseline_metrics.json` from the first framework subdirectory.
+10. Run `python benchmarks/blis_router/scripts/analyze_effort.py <output_dir>` to generate effort/cost analysis (see [Post-Experiment Analysis](#post-experiment-analysis) below).
+11. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
+12. **Write `analysis.md`** in the output directory summarizing both accuracy AND effort/cost results. It must include:
+    - Accuracy comparison table (scores, % improvement vs baseline)
+    - Effort summary table (iterations, wall time, avg/median iteration time, population size, unique scores, generation depth)
+    - Search efficiency table (% improvement per wall-clock minute)
+    - Convergence observations (iterations to best, % wasted compute)
+    - AdaEvolve island details (if applicable)
+    - Population quality comparison (spread, diversity ratio)
+    - Key takeaways comparing accuracy vs cost tradeoffs
+    - Experiment configuration (seed, model, inference-sim commit)
+13. Do NOT delete or modify output directories — they are the permanent record.
 
 ## Scoring
 
@@ -153,6 +163,76 @@ score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms
 | cache_warmup | Prefix cache effectiveness under warming | ~4400ms |
 | load_spikes | Routing under bursty arrivals | ~3300ms |
 | multiturn | Session-aware routing for multi-turn conversations | ~160ms |
+
+## Post-Experiment Analysis
+
+After all frameworks complete, run **three** analysis scripts to get a complete picture of both accuracy and cost/effort:
+
+```bash
+RESULTS_DIR="outputs/blis_router/<YYYYMMDD_HHMMSS>"
+
+# 1. Accuracy comparison (existing)
+python benchmarks/blis_router/scripts/compare_results.py "$RESULTS_DIR"
+python benchmarks/blis_router/scripts/plot_results.py "$RESULTS_DIR"
+
+# 2. Effort/cost analysis (NEW)
+python benchmarks/blis_router/scripts/analyze_effort.py "$RESULTS_DIR"
+```
+
+### What `analyze_effort.py` produces
+
+**Console output**: Summary table with per-framework effort metrics:
+- **Iterations**: Number of completed iterations
+- **Wall time**: Total wall-clock time (minutes)
+- **Avg/Median iteration time**: Duration per generate-evaluate cycle (seconds)
+- **Population size**: Final archive/population size at end of run
+- **Unique scores**: Number of distinct scores in final population (diversity measure)
+- **Max generation**: Deepest mutation depth (genealogy depth)
+- **Best iteration**: Which iteration found the best program
+- **Score + % improvement**: Best score vs baseline
+
+For AdaEvolve, additionally reports per-island details:
+- Per-island population, improvements, total evaluations, productivity (improvement rate)
+- Search intensity per island (exploration vs exploitation balance)
+- Diversity strategy, stagnation state, active paradigms
+
+**Output files** (saved to `<results_dir>/`):
+| File | Contents |
+|------|----------|
+| `effort_analysis.csv` | Per-framework effort metrics (machine-readable) |
+| `effort_analysis.json` | Full analysis with island details, trajectories, etc. |
+| `plots/iteration_duration_boxplot.png` | Box plot of iteration durations across frameworks |
+| `plots/convergence_curves.png` | Best score over iterations (with baseline reference) |
+| `plots/effort_vs_improvement.png` | Scatter: wall time vs score improvement (bubble = population size) |
+| `plots/search_efficiency.png` | Bar chart: % improvement per wall-clock minute |
+
+### Metrics available per framework
+
+| Metric | Source | All frameworks | AdaEvolve only |
+|--------|--------|:-:|:-:|
+| Iteration duration (avg, median, min, max, stddev) | Log files | ✓ | ✓ |
+| Total wall time | Log files | ✓ | ✓ |
+| Final population size | Checkpoint programs | ✓ | ✓ |
+| Unique score count (diversity) | Checkpoint programs | ✓ | ✓ |
+| Max/avg mutation generation depth | Checkpoint programs | ✓ | ✓ |
+| Best score + iteration found | best_program_info.json | ✓ | ✓ |
+| Score convergence trajectory | Iteration stats JSONL | | ✓ |
+| Number of islands | AdaEvolve metadata | | ✓ |
+| Per-island productivity | Iteration stats JSONL | | ✓ |
+| Per-island search intensity | Iteration stats JSONL | | ✓ |
+| UCB selection stats | Iteration stats JSONL | | ✓ |
+| Paradigm breakthrough state | Iteration stats JSONL | | ✓ |
+| Diversity strategy type | AdaEvolve metadata | | ✓ |
+
+### Interpreting results
+
+**Efficiency**: The `search_efficiency.png` plot shows which algorithm gets the most improvement per wall-clock minute. A framework with lower absolute improvement but much less wall time may be more practical.
+
+**Convergence**: The `convergence_curves.png` plot reveals whether a framework is still improving at the end of the run (suggesting more iterations would help) or has plateaued (diminishing returns).
+
+**Effort vs. improvement**: The scatter plot (`effort_vs_improvement.png`) lets you compare the cost-effectiveness of different approaches. Frameworks in the upper-left quadrant (high improvement, low cost) are ideal.
+
+**Diversity**: Low `unique_scores` relative to `population_size` suggests the search is converging to similar solutions. High diversity with low improvement may indicate the search is too exploratory.
 
 ## Troubleshooting
 
