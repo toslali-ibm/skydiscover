@@ -63,6 +63,7 @@ def _build_sim_cmd(
         "./simulation_worker", "run",
         "--model", SIM_MODEL,
         "--num-instances", "4",
+        "--hardware", "H100", "--tp", "1",
         "--policy-config", str(policy_config_path),
         "--workload-spec", str(workload_path),
         "--log", "info",
