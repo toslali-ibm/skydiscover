@@ -150,7 +150,7 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 
 4. Run frameworks **sequentially** (adaevolve → evox → openevolve → gepa → shinkaevolve). They share `routing.go` and cannot run in parallel.
 5. Always set `BLIS_OUTPUT_DIR` to the experiment output directory before calling `skydiscover-run`.
-6. Always set `BLIS_SEED` for reproducibility.
+6. Always set `BLIS_SEED` for reproducibility. Optionally set `BLIS_MULTI_LLM=1` to test against multiple LLMs. Set `BLIS_NUM_INSTANCES` to override the default 4 instances.
 7. **Monitor every 2 minutes** while a framework is running. Set up a background `sleep 120` loop and check the framework's log file after each interval. Every update to the user MUST include:
 
    **Validity check:**
@@ -259,15 +259,78 @@ score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms
 
 - Higher is better (less negative = lower latency)
 - Tested on 3 workloads: cache_warmup, load_spikes, multiturn
-- Baseline score with equal weights: approximately -4278
+- With `BLIS_MULTI_LLM=1`: averaged across 2 models × 3 workloads
+- Baseline score (single LLM): approximately -4487
+- Baseline score (multi-LLM): approximately -7121
+
+## Multi-LLM Evaluation
+
+By default, the evaluator tests against a single LLM (Llama 8B, blackbox coefficients). Set `BLIS_MULTI_LLM=1` to also test against Mixtral 8x7B MoE (crossmodel estimator), validating that discovered algorithms generalize across dense and MoE architectures.
+
+```bash
+export BLIS_MULTI_LLM=1
+export BLIS_OUTPUT_DIR="outputs/blis_router/${EXPERIMENT}/<FRAMEWORK>"
+export BLIS_SEED="42"
+```
+
+| Short Name | Model | Estimator | Hardware |
+|------------|-------|-----------|----------|
+| `llama_8b` | `meta-llama/llama-3.1-8b-instruct` | blackbox (trained coefficients) | H100, TP=1 |
+| `mixtral_8x7b` | `mistralai/mixtral-8x7b-instruct-v0.1` | crossmodel (physics-informed, MoE-aware) | H100, TP=2 |
+
+When multi-LLM is enabled:
+- Each evaluation runs 6 simulations (2 models × 3 workloads) instead of 3
+- Evaluation time roughly doubles (~6-9s per iteration instead of ~3-4s)
+- `baseline_metrics.json` includes a `per_model` key with full per-model per-workload breakdowns
+- The combined score and per-workload values in the evaluate return dict are averaged across models
+- Analysis scripts work unchanged — they read the same top-level fields
+
+## ShinkaEvolve Setup
+
+ShinkaEvolve is supported but **currently blocked** because it requires an embedding model (`text-embedding-3-small`) for code deduplication, and the IBM LiteLLM proxy does not serve embedding models.
+
+**To unblock ShinkaEvolve**, one of:
+1. Add an embedding model endpoint to LiteLLM proxy config, OR
+2. Modify `shinkaevolve_default.yaml` to set `code_embed_sim_threshold: 1.0` (disables embedding-based dedup — may produce more duplicate solutions but otherwise functional)
+
+**BLIS-specific config requirements** (must be set before running):
+- `max_parallel_jobs: 1` — BLIS evaluations write to a shared `routing.go` and CANNOT run in parallel. The default of 4 will corrupt results.
+- `embedding_model` — must point to a working embedding endpoint, or dedup must be disabled (see above)
+
+**Example run** (once unblocked):
+```bash
+# Ensure shinka package is installed
+uv sync --extra external
+
+# Run with BLIS router
+EXPERIMENT="$(date +%y%m%d)_100i_shinka"
+export BLIS_OUTPUT_DIR="outputs/blis_router/${EXPERIMENT}/shinkaevolve"
+export BLIS_SEED="42"
+mkdir -p "$BLIS_OUTPUT_DIR"
+uv run skydiscover-run \
+  benchmarks/blis_router/initial_program.py \
+  benchmarks/blis_router/evaluator.py \
+  -c benchmarks/blis_router/config.yaml \
+  -s shinkaevolve \
+  -i 100 \
+  -o "$BLIS_OUTPUT_DIR" \
+  -l INFO
+```
+
+**ShinkaEvolve key features** (from `shinkaevolve_default.yaml`):
+- Multi-patch evolution: diff (60%), full (30%), cross-pollination (10%)
+- UCB1 dynamic LLM selection across temperature variants (0.0, 0.7, 1.0)
+- 5 islands with migration every 5 generations
+- Meta-model guidance every 10 generations
+- Code-embedding deduplication (threshold 0.995) — requires embedding model
 
 ## Workloads
 
-| Workload | Tests | Typical Baseline E2E |
+| Workload | Tests | Typical Baseline E2E (Llama) |
 |----------|-------|---------------------|
-| cache_warmup | Prefix cache effectiveness under warming | ~4400ms |
-| load_spikes | Routing under bursty arrivals | ~3300ms |
-| multiturn | Session-aware routing for multi-turn conversations | ~160ms |
+| cache_warmup | Prefix cache effectiveness under warming | ~5554ms |
+| load_spikes | Routing under bursty arrivals | ~3188ms |
+| multiturn | Session-aware routing for multi-turn conversations | ~162ms |
 
 ## Post-Experiment Analysis
 

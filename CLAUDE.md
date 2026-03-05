@@ -59,6 +59,8 @@ EXPERIMENT="$(date +%y%m%d)_<N>i_<TAG>"
 # 4. Run a single framework
 export BLIS_OUTPUT_DIR="outputs/blis_router/${EXPERIMENT}/<FRAMEWORK>"
 export BLIS_SEED="42"
+# Optional: export BLIS_MULTI_LLM=1  # test against Llama 8B + Mixtral 8x7B MoE
+# Optional: export BLIS_NUM_INSTANCES=4  # default cluster size
 mkdir -p "$BLIS_OUTPUT_DIR"
 uv run skydiscover-run \
   benchmarks/blis_router/initial_program.py \
@@ -74,13 +76,14 @@ cd benchmarks/blis_router/inference-sim && git diff sim/routing.go  # must be em
 ls benchmarks/blis_router/baseline_metrics.json 2>/dev/null         # must not exist
 ```
 
-**Available frameworks**: `adaevolve`, `evox`, `openevolve_native`, `gepa_native`, `topk`, `best_of_n`, `beam_search`
+**Available frameworks**: `adaevolve`, `evox`, `openevolve_native`, `gepa_native`, `shinkaevolve`, `topk`, `best_of_n`, `beam_search`
 
 **Common pitfalls**:
 - `uv` not found → `pip3 install uv`
 - `Provider 'aws' requires api_base` → do NOT use `-m` flag; models are in config.yaml
 - EvoX 401 errors on label generation → fixed in `search/evox/controller.py` (propagates parent LLM config to search controller). If this recurs, the search controller's LLM config is being loaded from `search/evox/config/search.yaml` which defaults to OpenAI — the fix is to propagate `self.config.llm` to `controller_input.config.llm` in `_init_search_evolution_controller()`.
-- Experiments take ~30s per iteration (LLM call + Go build + 3 workload simulations)
+- ShinkaEvolve (`-s shinkaevolve`) is **currently blocked** — it requires an embedding model (`text-embedding-3-small`) for code deduplication, and the IBM LiteLLM proxy does not serve embedding models. Do NOT attempt to run ShinkaEvolve until this is resolved. See [ShinkaEvolve Setup](docs/experiments/blis-router.md#shinkaevolve-setup) for details and unblocking options. Also requires `max_parallel_jobs: 1` for BLIS router.
+- Experiments take ~30s per iteration (LLM call + Go build + 3 workload simulations). With `BLIS_MULTI_LLM=1`, ~45s (6 workload simulations across 2 LLMs)
 
 ## Project Structure (top-level)
 
