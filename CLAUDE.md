@@ -163,4 +163,5 @@ When running BLIS router experiments, Claude sessions MUST follow these rules:
    python benchmarks/blis_router/scripts/analyze_effort.py "$RESULTS_DIR"
    ```
 10. **Write or update `analysis.md`** in output dir. Use `effort_analysis.json` for accurate numbers. Must include: accuracy tables, % improvement, effort summary (iters, wall time, iteration times, pop size, diversity), search efficiency (%/min), convergence, population quality, key takeaways, experiment config. **CRITICAL**: When adding a framework to an existing experiment, update ALL tables — do not leave stale data. See [blis-router.md](docs/experiments/blis-router.md#after-experiments-run-all-steps--even-when-adding-one-framework-to-an-existing-experiment) for full checklist and `outputs/blis_router/20260304_182612/analysis.md` as reference.
-11. **Never delete output directories** — they are the permanent experimental record
+11. **Merge baseline metrics into best_program_info.json**: For each framework, copy the contents of `<framework>/baseline_metrics.json` into `<framework>/best/best_program_info.json` as a new top-level `"baseline_metrics"` key. This makes each best program self-contained for downstream comparison.
+12. **Never delete output directories** — they are the permanent experimental record

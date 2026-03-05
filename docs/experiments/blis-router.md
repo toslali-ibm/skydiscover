@@ -232,7 +232,24 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 
     **CRITICAL**: When adding a framework to an existing experiment, update ALL tables and findings in `analysis.md` — do not leave stale data from before the new framework was added.
 
-11. Do NOT delete or modify output directories — they are the permanent record.
+11. **Merge baseline metrics into best_program_info.json**: For each framework, copy the contents of `<framework>/baseline_metrics.json` into `<framework>/best/best_program_info.json` as a new top-level `"baseline_metrics"` key. This makes each best program self-contained with both its own metrics and the baseline it improved upon. Use a script like:
+    ```bash
+    RESULTS_DIR="outputs/blis_router/<EXPERIMENT_DIR>"
+    python3 -c "
+    import json, pathlib
+    for fw in pathlib.Path('$RESULTS_DIR').iterdir():
+        if not fw.is_dir(): continue
+        bl = fw / 'baseline_metrics.json'
+        bp = fw / 'best' / 'best_program_info.json'
+        if bl.exists() and bp.exists():
+            baseline = json.loads(bl.read_text())
+            info = json.loads(bp.read_text())
+            info['baseline_metrics'] = baseline
+            bp.write_text(json.dumps(info, indent=2) + '\n')
+            print(f'  Updated {fw.name}/best/best_program_info.json')
+    "
+    ```
+12. Do NOT delete or modify output directories — they are the permanent record.
 
 ## Scoring
 
