@@ -12,12 +12,40 @@ This guide covers how to run BLIS router optimization experiments using SkyDisco
 - inference-sim submodule initialized: `git submodule update --init benchmarks/blis_router/inference-sim`
 - BLIS builds: `cd benchmarks/blis_router/inference-sim && go build -o simulation_worker main.go`
 
-## Experiment Structure
+## Naming Convention
 
-Each experiment run creates a timestamped directory:
+Experiment directories follow this format:
 
 ```
-outputs/blis_router/<YYYYMMDD_HHMMSS>/
+outputs/blis_router/<YYMMDD>_<iters>i_<tag>/
+```
+
+| Component | Format | Example | Description |
+|-----------|--------|---------|-------------|
+| Date | `YYMMDD` | `260304` | When the experiment started |
+| Iterations | `<N>i` | `100i` | Number of iterations per framework |
+| Tag | short identifier | `seed42`, `sonnet`, `ablation` | Unique descriptor for the experiment |
+
+**Examples:**
+- `260304_100i_seed42` — 100 iterations, seed 42, default config
+- `260305_20i_seed42` — 20 iterations, seed 42
+- `260310_50i_opus_only` — 50 iterations, opus-only model ablation
+- `260312_100i_temp0` — 100 iterations, temperature 0 reproduction test
+
+**Rules:**
+- Always include iteration count — this is the most important parameter for comparison
+- Tags should be short (1-3 words, snake_case) and unique within the date
+- When in doubt, use `seed<N>` as the tag
+- Never reuse a directory name — if re-running the same config, add a suffix (`_v2`, `_rerun`)
+
+**Legacy directories** (`YYYYMMDD_HHMMSS` format like `20260304_170300`) predate this convention and should not be renamed.
+
+## Experiment Structure
+
+Each experiment run creates a directory:
+
+```
+outputs/blis_router/<experiment_name>/
 ├── adaevolve/
 │   ├── best/                  # Best discovered program
 │   ├── logs/                  # SkyDiscover logs

@@ -70,6 +70,8 @@ cd benchmarks/blis_router/inference-sim && git diff sim/routing.go  # must be em
 ls benchmarks/blis_router/baseline_metrics.json 2>/dev/null         # must not exist
 ```
 
+**Experiment naming**: `outputs/blis_router/<YYMMDD>_<N>i_<tag>/` — e.g., `260304_100i_seed42`. Always include date, iteration count, and a short unique tag. See [blis-router.md](docs/experiments/blis-router.md#naming-convention) for full convention.
+
 **Available frameworks**: `adaevolve`, `evox`, `openevolve_native`, `gepa_native`, `topk`, `best_of_n`, `beam_search`
 
 **Common pitfalls**:
