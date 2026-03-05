@@ -34,6 +34,9 @@ TIMING_RE = re.compile(r"Iteration\s+(\d+):.*completed in\s+([\d.]+)s")
 ITER_TIMESTAMP_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}),\d+\s+.*Iteration\s+(\d+):"
 )
+# Matches "Metrics: combined_score=X" lines (one per iteration in all frameworks)
+METRICS_RE = re.compile(r"Iteration\s+(\d+):.*completed in")
+SCORE_RE = re.compile(r"combined_score=([-\d.]+)")
 
 
 def _parse_datetime(s: str):
@@ -96,6 +99,82 @@ def extract_iteration_times_from_log(fw_dir: Path) -> list[float]:
     if len(ts_derived_times) > len(explicit_times):
         return ts_derived_times
     return explicit_times
+
+
+_GEPA_REJECTED_RE = re.compile(
+    r"Iteration\s+(\d+):\s+REJECTED child \(child_score=([-\d.]+)"
+)
+_GEPA_MERGE_RE = re.compile(
+    r"Iteration\s+(\d+):\s+Attempting merge.*scores:\s*([-\d.]+)"
+)
+
+
+def _extract_score_trajectory_from_logs(fw_dir: Path) -> list[float] | None:
+    """Extract best-score-so-far trajectory from log files.
+
+    Parses multiple iteration patterns across all frameworks:
+    - "Iteration N: Program ... completed in Xs" + "Metrics: combined_score=X"
+    - GEPA "Iteration N: REJECTED child (child_score=X ...)"
+    - GEPA "Iteration N: Attempting merge ... scores: X, Y"
+
+    Returns a list of best_score_so_far values, one per iteration (sorted by
+    iteration number). This is more accurate than checkpoint-based trajectories
+    because it captures every iteration, not just the surviving population.
+    """
+    log_files = list((fw_dir / "logs").glob("*.log")) if (fw_dir / "logs").is_dir() else []
+    run_log = fw_dir / "run.log"
+    if run_log.exists():
+        log_files.append(run_log)
+
+    # Collect (iteration_number, score) pairs
+    iter_scores: dict[int, float] = {}
+    for lf in log_files:
+        lines = lf.read_text(errors="replace").splitlines()
+        for i, line in enumerate(lines):
+            # Pattern 1: "Iteration N: Program ... completed in Xs" + Metrics line
+            m = TIMING_RE.search(line)
+            if m:
+                iter_num = int(m.group(1))
+                for j in range(i, min(i + 3, len(lines))):
+                    sm = SCORE_RE.search(lines[j])
+                    if sm:
+                        score = float(sm.group(1))
+                        if iter_num not in iter_scores or score > iter_scores[iter_num]:
+                            iter_scores[iter_num] = score
+                        break
+                continue
+
+            # Pattern 2: GEPA "REJECTED child (child_score=X ...)"
+            m = _GEPA_REJECTED_RE.search(line)
+            if m:
+                iter_num = int(m.group(1))
+                score = float(m.group(2))
+                if iter_num not in iter_scores or score > iter_scores[iter_num]:
+                    iter_scores[iter_num] = score
+                continue
+
+            # Pattern 3: GEPA "Attempting merge ... scores: X, Y"
+            m = _GEPA_MERGE_RE.search(line)
+            if m:
+                iter_num = int(m.group(1))
+                score = float(m.group(2))
+                if iter_num not in iter_scores or score > iter_scores[iter_num]:
+                    iter_scores[iter_num] = score
+                continue
+
+    if not iter_scores:
+        return None
+
+    # Build best-so-far trajectory sorted by iteration
+    sorted_iters = sorted(iter_scores.items())
+    best_so_far = float("-inf")
+    trajectory = []
+    for _iter_num, score in sorted_iters:
+        if score > best_so_far:
+            best_so_far = score
+        trajectory.append(best_so_far)
+
+    return trajectory
 
 
 def load_adaevolve_iteration_stats(fw_dir: Path) -> list[dict]:
@@ -276,18 +355,23 @@ def analyze_framework(fw_dir: Path) -> dict:
         result["use_paradigm_breakthrough"] = ada_meta.get("use_paradigm_breakthrough")
         result["use_dynamic_islands"] = ada_meta.get("use_dynamic_islands")
 
-    # 6. Convergence: build score trajectory from checkpoint programs if not from JSONL
-    if "score_trajectory" not in result and programs:
-        # Sort by iteration_found to build a trajectory
-        sorted_progs = sorted(programs, key=lambda p: p.get("iteration_found", 0))
-        best_so_far = float("-inf")
-        trajectory = []
-        for p in sorted_progs:
-            s = p.get("metrics", {}).get("combined_score")
-            if s is not None and s > best_so_far:
-                best_so_far = s
-            trajectory.append(best_so_far if best_so_far > float("-inf") else None)
-        result["score_trajectory"] = trajectory
+    # 6. Convergence: build score trajectory from log files (most accurate)
+    #    Falls back to JSONL stats (AdaEvolve) or checkpoint programs
+    if "score_trajectory" not in result:
+        log_trajectory = _extract_score_trajectory_from_logs(fw_dir)
+        if log_trajectory:
+            result["score_trajectory"] = log_trajectory
+        elif programs:
+            # Last resort: from checkpoint programs (less accurate — only shows population, not iterations)
+            sorted_progs = sorted(programs, key=lambda p: p.get("iteration_found", 0))
+            best_so_far = float("-inf")
+            trajectory = []
+            for p in sorted_progs:
+                s = p.get("metrics", {}).get("combined_score")
+                if s is not None and s > best_so_far:
+                    best_so_far = s
+                trajectory.append(best_so_far if best_so_far > float("-inf") else None)
+            result["score_trajectory"] = trajectory
 
     return result
 
@@ -458,13 +542,35 @@ def plot_convergence_curves(analyses: list[dict], baseline: dict | None, out_dir
     print(f"  Saved {out_dir / 'convergence_curves.png'}")
 
 
+def _time_to_best(a: dict) -> float | None:
+    """Estimate wall-clock time to find the best solution (seconds).
+
+    Uses the sum of the first `best_iteration` iteration durations if available,
+    otherwise falls back to best_iteration * avg_iter_time.
+    """
+    best_iter = a.get("best_iteration")
+    if best_iter is None:
+        return None
+    times = a.get("iter_times", [])
+    if times and best_iter <= len(times):
+        return sum(times[:best_iter])
+    avg = a.get("avg_iter_time_s")
+    if avg is not None:
+        return best_iter * avg
+    return None
+
+
 def plot_effort_vs_improvement(analyses: list[dict], baseline: dict | None, out_dir: Path):
-    """Scatter: total wall time vs score improvement, bubble size = population."""
+    """Scatter: total wall time vs score improvement, bubble size = population.
+
+    Each point shows total wall time (x) vs final improvement (y).
+    Annotated with best iteration and time-to-best for context.
+    """
     if not baseline:
         return
 
     baseline_score = baseline["combined_score"]
-    fig, ax = plt.subplots(figsize=(8, 5.5))
+    fig, ax = plt.subplots(figsize=(9, 5.5))
 
     for a in analyses:
         score = a.get("best_score")
@@ -474,13 +580,31 @@ def plot_effort_vs_improvement(analyses: list[dict], baseline: dict | None, out_
         pct_improv = (score - baseline_score) / abs(baseline_score) * 100
         pop = a.get("final_population_size", 10)
         size = max(40, min(300, pop * 8))
+
+        # Main point: total wall time
         ax.scatter(wall / 60, pct_improv, s=size, color=_fw_color(a["framework"]),
                    edgecolors="white", linewidth=1, zorder=3, alpha=0.85)
-        ax.annotate(a["framework"], (wall / 60, pct_improv),
-                    textcoords="offset points", xytext=(8, 4), fontsize=8.5)
+
+        # Annotate with framework name + time-to-best
+        ttb = _time_to_best(a)
+        best_iter = a.get("best_iteration", "?")
+        if ttb is not None:
+            label = f"{a['framework']}\n(best @ iter {best_iter}, {ttb/60:.0f}m)"
+        else:
+            label = a["framework"]
+        ax.annotate(label, (wall / 60, pct_improv),
+                    textcoords="offset points", xytext=(8, 4), fontsize=7.5)
+
+        # Draw arrow from time-to-best to total wall time (shows wasted compute)
+        if ttb is not None and ttb < wall * 0.9:
+            ax.annotate("", xy=(wall / 60, pct_improv), xytext=(ttb / 60, pct_improv),
+                        arrowprops=dict(arrowstyle="->", color=_fw_color(a["framework"]),
+                                       alpha=0.3, lw=1.5))
+            ax.scatter(ttb / 60, pct_improv, s=30, color=_fw_color(a["framework"]),
+                       marker="d", edgecolors="white", linewidth=0.5, zorder=4, alpha=0.7)
 
     ax.axhline(y=0, color="#999999", linestyle="--", linewidth=0.8, zorder=1)
-    ax.set_xlabel("Total Wall Time (minutes)")
+    ax.set_xlabel("Wall Time (minutes)  [diamond = time-to-best, circle = total]")
     ax.set_ylabel("Score Improvement vs Baseline (%)")
     ax.set_title("BLIS Router: Effort vs Improvement (bubble size = population)")
     ax.spines["top"].set_visible(False)
@@ -492,37 +616,56 @@ def plot_effort_vs_improvement(analyses: list[dict], baseline: dict | None, out_
 
 
 def plot_efficiency_bar(analyses: list[dict], baseline: dict | None, out_dir: Path):
-    """Bar chart: improvement-per-minute for each framework."""
+    """Grouped bar chart: efficiency by total wall time vs time-to-best.
+
+    Shows two bars per framework:
+    - Total: % improvement / total wall time (given fixed iteration budget)
+    - Time-to-best: % improvement / time until best was found (convergence speed)
+    """
     if not baseline:
         return
 
     baseline_score = baseline["combined_score"]
     names = []
-    efficiencies = []
-    colors = []
+    eff_total = []
+    eff_ttb = []
 
     for a in analyses:
         score = a.get("best_score")
         wall = a.get("total_wall_time_s")
+        ttb = _time_to_best(a)
         if score is None or wall is None or wall == 0:
             continue
         pct_improv = (score - baseline_score) / abs(baseline_score) * 100
-        eff = pct_improv / (wall / 60)  # % improvement per minute
         names.append(a["framework"])
-        efficiencies.append(eff)
-        colors.append(_fw_color(a["framework"]))
+        eff_total.append(pct_improv / (wall / 60))
+        eff_ttb.append(pct_improv / (ttb / 60) if ttb and ttb > 0 else 0)
 
     if not names:
         return
 
-    fig, ax = plt.subplots(figsize=(max(7, len(names) * 1.4), 5))
-    bars = ax.bar(names, efficiencies, color=colors, edgecolor="white", width=0.6)
-    for bar, eff in zip(bars, efficiencies):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                f"{eff:.3f}%/min", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+    x = range(len(names))
+    width = 0.35
+    fig, ax = plt.subplots(figsize=(max(8, len(names) * 2), 5.5))
+    bars1 = ax.bar([i - width / 2 for i in x], eff_total, width,
+                   label="Total wall time", color="#4C72B0", edgecolor="white")
+    bars2 = ax.bar([i + width / 2 for i in x], eff_ttb, width,
+                   label="Time to best", color="#55A868", edgecolor="white")
 
+    for bar, eff in zip(bars1, eff_total):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                f"{eff:.2f}", ha="center", va="bottom", fontsize=8, fontweight="bold",
+                color="#4C72B0")
+    for bar, eff in zip(bars2, eff_ttb):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                f"{eff:.2f}", ha="center", va="bottom", fontsize=8, fontweight="bold",
+                color="#55A868")
+
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(names)
     ax.set_ylabel("Improvement per Minute (%/min)")
-    ax.set_title("BLIS Router: Search Efficiency (% improvement / wall-clock minute)")
+    ax.set_title("BLIS Router: Search Efficiency (%/min by total time vs time-to-best)")
+    ax.legend()
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
