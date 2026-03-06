@@ -5,10 +5,15 @@ Evaluates evolved routing algorithms by:
 1. Extracting Go code from Python wrapper
 2. Writing evolved routing.go to BLIS source (restored after evaluation)
 3. Building BLIS
-4. Running simulations on 3 routing-sensitive v2 workloads
+4. Running simulations on 3 routing-sensitive v2 workloads (optionally x N LLMs)
 5. Computing score based on average end-to-end latency
 
 Score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms (higher = better)
+
+Multi-LLM mode (BLIS_MULTI_LLM=1):
+  Runs each workload against multiple LLM model configurations to test
+  generalizability. The combined score averages across all models and workloads.
+  Baseline metrics include per-model breakdowns.
 
 Experiment isolation:
 - routing.go is saved before and restored after every evaluation
@@ -37,8 +42,25 @@ WORKLOADS = [
     ("multiturn", "workload_v2_multiturn.yaml"),
 ]
 
-SIM_MODEL = os.environ.get("BLIS_MODEL", "meta-llama/llama-3.1-8b-instruct")
+# Model configs: (short_name, model_id, extra CLI args)
+_MODEL_LLAMA_8B = ("llama_8b", "meta-llama/llama-3.1-8b-instruct", [
+    "--hardware", "H100", "--tp", "1",
+])
+_MODEL_MIXTRAL_MOE = ("mixtral_8x7b", "mistralai/mixtral-8x7b-instruct-v0.1", [
+    "--latency-model", "crossmodel",
+    "--hardware", "H100", "--tp", "2",
+])
+
 SIM_SEED = os.environ.get("BLIS_SEED", "42")
+SIM_NUM_INSTANCES = os.environ.get("BLIS_NUM_INSTANCES", "4")
+MULTI_LLM = os.environ.get("BLIS_MULTI_LLM", "0") == "1"
+
+
+def _get_models():
+    """Return list of model configs to evaluate against."""
+    if MULTI_LLM:
+        return [_MODEL_LLAMA_8B, _MODEL_MIXTRAL_MOE]
+    return [_MODEL_LLAMA_8B]
 
 
 def _get_output_dir() -> Path:
@@ -57,28 +79,18 @@ def _get_output_dir() -> Path:
 
 
 def _build_sim_cmd(
-    inference_sim_dir: Path, policy_config_path: Path, workload_path: Path
+    inference_sim_dir: Path, policy_config_path: Path, workload_path: Path,
+    model_id: str, extra_args: list[str],
 ) -> list[str]:
-    cmd = [
+    return [
         "./simulation_worker", "run",
-        "--model", SIM_MODEL,
-        "--num-instances", "4",
-        "--hardware", "H100", "--tp", "1",
+        "--model", model_id,
+        "--num-instances", SIM_NUM_INSTANCES,
         "--policy-config", str(policy_config_path),
         "--workload-spec", str(workload_path),
         "--log", "info",
         "--seed", SIM_SEED,
-    ]
-    if "Qwen" in SIM_MODEL:
-        cmd += [
-            "--hardware", "H100", "--tp", "1",
-            "--alpha-coeffs", "4680.303204056608,0.0,0.0",
-            "--beta-coeffs", "7051.796874715078,19.538416565504026,25.431830886933543",
-            "--total-kv-blocks", "65833",
-            "--max-num-running-reqs", "256",
-            "--max-num-scheduled-tokens", "4096",
-        ]
-    return cmd
+    ] + extra_args
 
 
 def _restore_routing_go(routing_go_path: Path, original_content: str):
@@ -167,6 +179,88 @@ def _error_result(error_msg: str, error_type: str, suggestion: str = "", **extra
     }
 
 
+def _run_workloads(
+    models, script_dir: Path, inference_sim_dir: Path, policy_config_path: Path,
+) -> tuple[list[float], list[float], dict, dict]:
+    """Run all workloads across all models. Returns (latencies, tail_latencies, workload_results, per_model)."""
+    all_latencies = []
+    all_tail_latencies = []
+    per_model = {}
+    # Aggregate per-workload across models (for evaluate() return value)
+    workload_agg: dict[str, list[dict]] = {wl: [] for wl, _ in WORKLOADS}
+
+    for model_name, model_id, extra_args in models:
+        model_latencies = []
+        model_tail_latencies = []
+        model_workloads = {}
+
+        for workload_name, workload_file in WORKLOADS:
+            workload_path = script_dir / "workloads" / workload_file
+            cmd = _build_sim_cmd(
+                inference_sim_dir, policy_config_path, workload_path,
+                model_id, extra_args,
+            )
+            log_key = f"{model_name}/{workload_name}" if len(models) > 1 else workload_name
+            try:
+                sim_result = subprocess.run(
+                    cmd, cwd=inference_sim_dir, capture_output=True, text=True, timeout=120,
+                )
+                if sim_result.returncode != 0:
+                    logger.warning("%s failed: %s", log_key, sim_result.stderr[:300])
+                    model_workloads[workload_name] = {"e2e_ms": None, "error": "Simulation failed"}
+                    continue
+                output_text = sim_result.stdout + (sim_result.stderr or "")
+                cluster_metrics = _parse_cluster_metrics(output_text)
+                if cluster_metrics and "e2e_mean_ms" in cluster_metrics:
+                    e2e_ms = float(cluster_metrics["e2e_mean_ms"])
+                    e2e_p95_ms = float(cluster_metrics.get("e2e_p95_ms", e2e_ms))
+                    model_latencies.append(e2e_ms)
+                    model_tail_latencies.append(e2e_p95_ms)
+                    entry = {
+                        "e2e_ms": e2e_ms, "e2e_p95_ms": e2e_p95_ms,
+                        "completed_requests": cluster_metrics.get("completed_requests"),
+                        "ttft_mean_ms": cluster_metrics.get("ttft_mean_ms"),
+                        "tokens_per_sec": cluster_metrics.get("tokens_per_sec"),
+                    }
+                    model_workloads[workload_name] = entry
+                    workload_agg[workload_name].append(entry)
+                    logger.info(f"{log_key}: e2e_mean={e2e_ms:.2f}ms, p95={e2e_p95_ms:.2f}ms")
+                else:
+                    logger.warning("%s: no cluster metrics found", log_key)
+                    model_workloads[workload_name] = {"e2e_ms": None, "error": "No cluster metrics"}
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError) as exc:
+                logger.warning("%s failed: %s", log_key, exc)
+                model_workloads[workload_name] = {"e2e_ms": None, "error": str(exc)}
+            except Exception as exc:
+                logger.error("Unexpected error in %s: %s", log_key, exc, exc_info=True)
+                model_workloads[workload_name] = {"e2e_ms": None, "error": f"Unexpected: {exc}"}
+
+        per_model_entry = {"model_id": model_id, "workloads": model_workloads}
+        if model_latencies:
+            per_model_entry["avg_e2e_ms"] = sum(model_latencies) / len(model_latencies)
+            per_model_entry["avg_p95_ms"] = sum(model_tail_latencies) / len(model_tail_latencies)
+        per_model[model_name] = per_model_entry
+        all_latencies.extend(model_latencies)
+        all_tail_latencies.extend(model_tail_latencies)
+
+    # Build per-workload aggregate (average across models)
+    workload_results = {}
+    for workload_name, entries in workload_agg.items():
+        if entries:
+            avg_e2e = sum(e["e2e_ms"] for e in entries) / len(entries)
+            avg_p95 = sum(e["e2e_p95_ms"] for e in entries) / len(entries)
+            workload_results[workload_name] = {
+                "e2e_ms": avg_e2e, "e2e_p95_ms": avg_p95,
+                "completed_requests": entries[0].get("completed_requests"),
+                "ttft_mean_ms": entries[0].get("ttft_mean_ms"),
+                "tokens_per_sec": entries[0].get("tokens_per_sec"),
+            }
+        else:
+            workload_results[workload_name] = {"e2e_ms": None, "error": "All models failed"}
+
+    return all_latencies, all_tail_latencies, workload_results, per_model
+
+
 def get_or_compute_baseline(
     script_dir: Path, inference_sim_dir: Path, policy_config_path: Path
 ) -> dict:
@@ -214,39 +308,27 @@ def get_or_compute_baseline(
             logger.warning("Baseline build failed: %s", build_result.stderr[:300])
             return {}
 
+        models = _get_models()
+        all_latencies, all_tail_latencies, workload_results, per_model = _run_workloads(
+            models, script_dir, inference_sim_dir, policy_config_path,
+        )
+
         baseline = {}
-        latencies = []
-        tail_latencies = []
+        # Per-workload (averaged across models)
+        for wl_name, wl_data in workload_results.items():
+            if wl_data.get("e2e_ms") is not None:
+                baseline[f"{wl_name}_e2e_ms"] = wl_data["e2e_ms"]
 
-        for workload_name, workload_file in WORKLOADS:
-            workload_path = script_dir / "workloads" / workload_file
-            cmd = _build_sim_cmd(inference_sim_dir, policy_config_path, workload_path)
-            try:
-                sim_result = subprocess.run(
-                    cmd, cwd=inference_sim_dir, capture_output=True, text=True, timeout=120,
-                )
-                if sim_result.returncode != 0:
-                    logger.warning("Baseline %s failed: %s", workload_name, sim_result.stderr[:300])
-                    continue
-                output_text = sim_result.stdout + (sim_result.stderr or "")
-                cluster_metrics = _parse_cluster_metrics(output_text)
-                if cluster_metrics and "e2e_mean_ms" in cluster_metrics:
-                    e2e_ms = float(cluster_metrics["e2e_mean_ms"])
-                    e2e_p95_ms = float(cluster_metrics.get("e2e_p95_ms", e2e_ms))
-                    baseline[f"{workload_name}_e2e_ms"] = e2e_ms
-                    latencies.append(e2e_ms)
-                    tail_latencies.append(e2e_p95_ms)
-                else:
-                    logger.warning("Baseline %s: no cluster metrics found", workload_name)
-            except (subprocess.TimeoutExpired, OSError) as exc:
-                logger.warning("Baseline %s error: %s", workload_name, exc)
-
-        if latencies:
-            avg_e2e = sum(latencies) / len(latencies)
-            avg_p95 = sum(tail_latencies) / len(tail_latencies)
+        if all_latencies:
+            avg_e2e = sum(all_latencies) / len(all_latencies)
+            avg_p95 = sum(all_tail_latencies) / len(all_tail_latencies)
             baseline["avg_e2e_ms"] = avg_e2e
             baseline["avg_p95_ms"] = avg_p95
             baseline["combined_score"] = -0.5 * avg_e2e - 0.5 * avg_p95
+
+        # Per-model breakdown (only in baseline, not in evaluate return)
+        if len(models) > 1:
+            baseline["per_model"] = per_model
 
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -352,65 +434,27 @@ def evaluate(program_path: str) -> dict:
                 full_traceback=traceback.format_exc(),
             )
 
-        latencies = []
-        tail_latencies = []
-        request_counts = []
-        workload_results = {}
-        failed_workloads = []
+        models = _get_models()
+        all_latencies, all_tail_latencies, workload_results, _ = _run_workloads(
+            models, script_dir, inference_sim_dir, policy_config_path,
+        )
 
-        for workload_name, workload_file in WORKLOADS:
-            try:
-                workload_path = script_dir / "workloads" / workload_file
-                cmd = _build_sim_cmd(inference_sim_dir, policy_config_path, workload_path)
-                result = subprocess.run(
-                    cmd, cwd=inference_sim_dir, capture_output=True, text=True, timeout=120,
-                )
-                if result.returncode != 0:
-                    failed_workloads.append(workload_name)
-                    workload_results[workload_name] = {"e2e_ms": None, "error": "Simulation failed", "stderr": result.stderr[:500]}
-                    continue
+        failed_workloads = [wl for wl, d in workload_results.items() if d.get("e2e_ms") is None]
 
-                output_text = result.stdout + (result.stderr or "")
-                cluster_metrics = _parse_cluster_metrics(output_text)
-
-                if cluster_metrics and "e2e_mean_ms" in cluster_metrics:
-                    e2e_ms = float(cluster_metrics["e2e_mean_ms"])
-                    e2e_p95_ms = float(cluster_metrics.get("e2e_p95_ms", e2e_ms))
-                    latencies.append(e2e_ms)
-                    tail_latencies.append(e2e_p95_ms)
-                    request_counts.append(int(cluster_metrics.get("completed_requests", 1)))
-                    workload_results[workload_name] = {
-                        "e2e_ms": e2e_ms, "e2e_p95_ms": e2e_p95_ms,
-                        "completed_requests": cluster_metrics.get("completed_requests"),
-                        "ttft_mean_ms": cluster_metrics.get("ttft_mean_ms"),
-                        "tokens_per_sec": cluster_metrics.get("tokens_per_sec"),
-                    }
-                    logger.info(f"{workload_name}: e2e_mean={e2e_ms:.2f}ms, p95={e2e_p95_ms:.2f}ms")
-                else:
-                    failed_workloads.append(workload_name)
-                    workload_results[workload_name] = {"e2e_ms": None, "error": "No cluster metrics found"}
-
-            except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError) as e:
-                failed_workloads.append(workload_name)
-                workload_results[workload_name] = {"e2e_ms": None, "error": str(e)}
-                logger.warning("Workload %s failed: %s", workload_name, e)
-            except Exception as e:
-                logger.error("Unexpected error in workload %s: %s", workload_name, e, exc_info=True)
-                failed_workloads.append(workload_name)
-                workload_results[workload_name] = {"e2e_ms": None, "error": f"Unexpected: {e}"}
-
-        if len(latencies) == 0:
+        if len(all_latencies) == 0:
             return _error_result(
                 "All workloads failed", "AllWorkloadsFailed",
                 "Check BLIS simulation errors. May be routing logic causing crashes or timeouts.",
                 failed_workloads=failed_workloads, workload_results=workload_results,
             )
 
-        avg_latency = sum(latencies) / len(latencies)
-        avg_tail_latency = sum(tail_latencies) / len(tail_latencies)
+        avg_latency = sum(all_latencies) / len(all_latencies)
+        avg_tail_latency = sum(all_tail_latencies) / len(all_tail_latencies)
 
         score = -0.5 * avg_latency - 0.5 * avg_tail_latency
-        success_rate = len(latencies) / len(WORKLOADS)
+        total_runs = len(models) * len(WORKLOADS)
+        num_successful = len(all_latencies)
+        success_rate = num_successful / total_runs
 
         return {
             "combined_score": score,
@@ -420,11 +464,11 @@ def evaluate(program_path: str) -> dict:
             "load_spikes_e2e_ms": workload_results.get("load_spikes", {}).get("e2e_ms"),
             "multiturn_e2e_ms": workload_results.get("multiturn", {}).get("e2e_ms"),
             "success_rate": success_rate,
-            "num_successful": len(latencies),
+            "num_successful": num_successful,
             "num_failed": len(failed_workloads),
             "artifacts": {
                 "workload_results": workload_results,
-                "successful_workloads": len(latencies),
+                "successful_workloads": num_successful,
                 "failed_workloads": len(failed_workloads),
                 "success_rate": f"{success_rate:.0%}",
                 **({"warning": f"Some workloads failed: {', '.join(failed_workloads)}",

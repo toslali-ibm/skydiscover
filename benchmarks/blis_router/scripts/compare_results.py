@@ -54,6 +54,25 @@ def main():
         p95_str = f"{avg_p95:.2f}" if isinstance(avg_p95, (int, float)) else str(avg_p95)
         print(f"{fw:<15} {score_str:>10} {e2e_str:>10} {p95_str:>10} {str(iteration):>12}")
 
+    # Show per-model baseline breakdown if multi-LLM
+    baseline = None
+    for fw in frameworks:
+        bf = results_dir / fw / "baseline_metrics.json"
+        if bf.exists():
+            with open(bf) as f:
+                baseline = json.load(f)
+            break
+    if baseline and "per_model" in baseline:
+        print(f"\nMulti-LLM baseline breakdown:")
+        print(f"  {'Model':<20} {'Avg E2E':>10} {'Avg P95':>10}")
+        print(f"  {'-'*42}")
+        for model_name, model_data in baseline["per_model"].items():
+            e2e = model_data.get("avg_e2e_ms")
+            p95 = model_data.get("avg_p95_ms")
+            e2e_s = f"{e2e:.2f}" if e2e else "N/A"
+            p95_s = f"{p95:.2f}" if p95 else "N/A"
+            print(f"  {model_name:<20} {e2e_s:>10} {p95_s:>10}")
+
     # Save CSV
     csv_path = results_dir / "comparison_table.csv"
     with open(csv_path, "w") as f:
