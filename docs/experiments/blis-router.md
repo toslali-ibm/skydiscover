@@ -196,12 +196,13 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 
 ### After Experiments (run ALL steps — even when adding one framework to an existing experiment)
 
-8. Run **all three** analysis scripts in order:
+8. Run **all four** analysis scripts in order:
    ```bash
    RESULTS_DIR="outputs/blis_router/<YYYYMMDD_HHMMSS>"
    python benchmarks/blis_router/scripts/compare_results.py "$RESULTS_DIR"
    python benchmarks/blis_router/scripts/plot_results.py "$RESULTS_DIR"
    python benchmarks/blis_router/scripts/analyze_effort.py "$RESULTS_DIR"
+   python benchmarks/blis_router/scripts/analyze_diffs.py "$RESULTS_DIR"
    ```
    This produces **7 plots** in `<RESULTS_DIR>/plots/`:
    - `combined_scores.png` — bar chart of combined score per framework + baseline
@@ -212,7 +213,7 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
    - `effort_vs_improvement.png` — scatter: wall time vs improvement (bubble = population)
    - `search_efficiency.png` — bar chart: % improvement per wall-clock minute
 
-   Plus: `comparison_table.csv`, `effort_analysis.csv`, `effort_analysis.json`
+   Plus: `comparison_table.csv`, `effort_analysis.csv`, `effort_analysis.json`, `diff_explanations.md`, and per-framework `best/best_vs_initial.diff` files
 
 9. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
 10. **Write or update `analysis.md`** in the output directory. Use data from the scripts above (especially `effort_analysis.json`). It MUST include ALL of:
@@ -334,17 +335,20 @@ uv run skydiscover-run \
 
 ## Post-Experiment Analysis
 
-After all frameworks complete, run **three** analysis scripts to get a complete picture of both accuracy and cost/effort:
+After all frameworks complete, run **four** analysis scripts to get a complete picture of accuracy, cost/effort, and code changes:
 
 ```bash
 RESULTS_DIR="outputs/blis_router/<YYYYMMDD_HHMMSS>"
 
-# 1. Accuracy comparison (existing)
+# 1. Accuracy comparison
 python benchmarks/blis_router/scripts/compare_results.py "$RESULTS_DIR"
 python benchmarks/blis_router/scripts/plot_results.py "$RESULTS_DIR"
 
-# 2. Effort/cost analysis (NEW)
+# 2. Effort/cost analysis
 python benchmarks/blis_router/scripts/analyze_effort.py "$RESULTS_DIR"
+
+# 3. Diff analysis (diffs + LLM explanations)
+python benchmarks/blis_router/scripts/analyze_diffs.py "$RESULTS_DIR"
 ```
 
 ### What `analyze_effort.py` produces
