@@ -35,8 +35,20 @@ prompt:
       - snap.QueueDepth, snap.BatchSize, snap.InFlightRequests
       - snap.EffectiveLoad(): QueueDepth + BatchSize + InFlightRequests
       - snap.CacheHitRate: historical cache hit rate (0.0-1.0)
-      - snap.KVUtilization: memory pressure (may be stale under high load)
+      - snap.KVUtilization: memory pressure (0.0-1.0)
       - snap.FreeKVBlocks: available memory blocks
+
+    SIGNAL FRESHNESS (snapshots refresh every 5 seconds, like a real Prometheus scrape):
+      - STALE (up to 5s old): QueueDepth, BatchSize, KVUtilization, FreeKVBlocks
+      - FRESH every routing call: InFlightRequests (tracked at cluster level, not scraped)
+      - FRESH every routing call: scores[snap.ID] (prefix-affinity scorer maintains its own
+        router-side cache index, updated after each decision — not scraped from instances)
+      - FRESH every routing call: snap.CacheHitRate (derived from prefix-affinity scorer state)
+      EffectiveLoad() = QueueDepth + BatchSize + InFlightRequests — partially stale.
+      At high request rates, hundreds of routing decisions happen between refreshes.
+      Stale signals look identical across instances even when actual state differs.
+      InFlightRequests and prefix-affinity scores are the only signals that differentiate
+      instances between refreshes.
 
     You can modify scores[snap.ID] after the scorer loop, add conditionals, or change
     the selection logic.
@@ -49,7 +61,10 @@ prompt:
     5. Don't add new keys to scores[] — only modify existing instance IDs
 
     EVALUATION: Score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms (lower latency = higher score)
-    Tested on 3 workloads: cache_warmup, load_spikes, multiturn.
+    Tested on 3 workloads with different routing tensions:
+      - cache_warmup: 3 prefix groups across 4 instances, moderate rate. Prefix-affinity creates load imbalance.
+      - load_spikes: one prefix group gets 50% of bursty traffic. Cache affinity concentrates load.
+      - multiturn: multi-turn sessions with large prefixes. Bouncing sessions causes expensive cache misses.
 
 search:
   type: "adaevolve"
