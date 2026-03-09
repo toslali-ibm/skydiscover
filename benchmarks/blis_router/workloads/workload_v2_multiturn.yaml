@@ -29,7 +29,7 @@
 #   Load-only routing destroys session affinity, causing measurable cache misses.
 #
 # DESIGN:
-#   - 1500 requests at rate=150 -> 10 seconds simulated time
+#   - 9000 requests at rate=150 -> 60 seconds simulated time
 #   - 40% heavy multi-turn coding (prefix=4096, short output, 5 rounds)
 #   - 25% moderate multi-turn chat (prefix=2048, short output, 4 rounds)
 #   - 15% light multi-turn Q&A (prefix=1024, short output, 3 rounds)
@@ -39,7 +39,7 @@ version: "1"
 seed: 42
 category: reasoning
 aggregate_rate: 150.0
-num_requests: 1500
+num_requests: 9000
 
 clients:
   # Heavy coding sessions: very large prefix (4096), short output.

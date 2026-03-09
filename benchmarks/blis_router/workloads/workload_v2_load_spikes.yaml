@@ -26,16 +26,18 @@
 #   Conclusion: prefix-affinity is HARMFUL here. Load-balance is essential.
 #
 # DESIGN:
-#   - 5000 requests at rate=1000 -> 5 seconds simulated time
+#   - 18000 requests at rate=300 -> 60 seconds simulated time
 #   - 50% heavy-prefix bursty traffic (gamma CV=3, prefix=512)
 #   - 25% realtime SLO-critical (no prefix, needs idle instances)
 #   - 25% different prefix group (should use its own cached instance)
+#   - Higher rate than cache_warmup so gamma bursts create queueing crises
+#     where smart routing under pressure matters (14B P99 ~11s during spikes)
 
 version: "1"
 seed: 42
 category: language
-aggregate_rate: 1000.0
-num_requests: 5000
+aggregate_rate: 300.0
+num_requests: 18000
 
 clients:
   # Heavy hitter: 50% of ALL traffic, large shared prefix, bursty arrival.

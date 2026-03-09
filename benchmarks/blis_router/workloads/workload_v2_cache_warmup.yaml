@@ -22,17 +22,18 @@
 #   Conclusion: load-aware routing beats pure prefix-affinity here.
 #
 # DESIGN:
-#   - 5000 requests at rate=1000 -> 5 seconds simulated time
+#   - 12000 requests at rate=200 -> 60 seconds simulated time
 #   - 3 distinct prefix groups (each ~30% of traffic) create cache differentiation
 #   - 15% no-prefix traffic tests load balancing without cache benefit
-#   - Moderate rate creates queueing but doesn't saturate
-#   - Long enough for caches to warm (~1250 reqs/instance before halfway point)
+#   - Rate=200 creates moderate queueing (~70-80% utilization) where routing matters
+#   - Long enough for caches to warm and for stale snapshot signals to cycle
+#     (12 refresh cycles at 5s snapshot-refresh-interval)
 
 version: "1"
 seed: 42
 category: language
-aggregate_rate: 1000.0
-num_requests: 5000
+aggregate_rate: 200.0
+num_requests: 12000
 
 clients:
   # Group A: Shared system prompt (e.g., chatbot)

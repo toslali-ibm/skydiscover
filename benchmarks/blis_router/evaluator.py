@@ -43,24 +43,25 @@ WORKLOADS = [
 ]
 
 # Model configs: (short_name, model_id, extra CLI args)
-_MODEL_LLAMA_8B = ("llama_8b", "meta-llama/llama-3.1-8b-instruct", [
+_MODEL_QWEN_7B = ("qwen_7b", "qwen/qwen2.5-7b-instruct", [
     "--hardware", "H100", "--tp", "1",
 ])
-_MODEL_MIXTRAL_MOE = ("mixtral_8x7b", "mistralai/mixtral-8x7b-instruct-v0.1", [
-    "--latency-model", "crossmodel",
-    "--hardware", "H100", "--tp", "2",
+_MODEL_QWEN_14B = ("qwen_14b", "qwen/qwen3-14b", [
+    "--hardware", "H100", "--tp", "1",
 ])
 
 SIM_SEED = os.environ.get("BLIS_SEED", "42")
 SIM_NUM_INSTANCES = os.environ.get("BLIS_NUM_INSTANCES", "4")
 MULTI_LLM = os.environ.get("BLIS_MULTI_LLM", "0") == "1"
+# Snapshot refresh interval in microseconds (5 seconds = realistic Prometheus scrape)
+SIM_SNAPSHOT_REFRESH = os.environ.get("BLIS_SNAPSHOT_REFRESH", "5000000")
 
 
 def _get_models():
     """Return list of model configs to evaluate against."""
     if MULTI_LLM:
-        return [_MODEL_LLAMA_8B, _MODEL_MIXTRAL_MOE]
-    return [_MODEL_LLAMA_8B]
+        return [_MODEL_QWEN_7B, _MODEL_QWEN_14B]
+    return [_MODEL_QWEN_7B]
 
 
 def _get_output_dir() -> Path:
@@ -88,6 +89,7 @@ def _build_sim_cmd(
         "--num-instances", SIM_NUM_INSTANCES,
         "--policy-config", str(policy_config_path),
         "--workload-spec", str(workload_path),
+        "--snapshot-refresh-interval", SIM_SNAPSHOT_REFRESH,
         "--log", "info",
         "--seed", SIM_SEED,
     ] + extra_args
