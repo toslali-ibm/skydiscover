@@ -213,12 +213,26 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
    - `effort_vs_improvement.png` — scatter: wall time vs improvement (bubble = population)
    - `search_efficiency.png` — bar chart: % improvement per wall-clock minute
 
-   Plus: `comparison_table.csv`, `effort_analysis.csv`, `effort_analysis.json`, `diff_explanations.md`, and per-framework `best/best_vs_initial.diff` files
+   Plus data files:
+   - `comparison_table.csv` — **includes baseline row + per-workload E2E and P95 columns** (authoritative source for analysis.md tables)
+   - `effort_analysis.csv`, `effort_analysis.json` — effort metrics per framework
+   - `diff_explanations.md` — diffs with LLM explanations
+   - Per-framework `best/best_vs_initial.diff` files
 
 9. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
-10. **Write or update `analysis.md`** in the output directory. Use data from the scripts above (especially `effort_analysis.json`). It MUST include ALL of:
+10. **Write or update `analysis.md`** in the output directory.
+
+    **DATA SOURCING RULE**: Every number in `analysis.md` MUST come from script output or JSON files — never compute or estimate numbers manually. Specifically:
+    - Aggregate scores → `comparison_table.csv` or `compare_results.py` console output
+    - Per-workload E2E and P95 → `comparison_table.csv` (includes baseline row and per-workload columns)
+    - Effort metrics → `effort_analysis.json`
+    - Per-model baseline → `compare_results.py` console output (Multi-LLM baseline breakdown section)
+    - If a number isn't in any script output, add it to the script first — do NOT fabricate it.
+
+    The analysis MUST include ALL of:
     - Accuracy comparison table (scores, % improvement vs baseline) — **all frameworks including any newly added**
-    - % improvement vs baseline table
+    - Per-workload E2E latency table (baseline + all frameworks) — **copy from `compare_results.py` output**
+    - Per-workload P95 latency table (baseline + all frameworks) — **copy from `compare_results.py` output**
     - Key findings
     - Convergence comparison (20-iter vs 100-iter scores, if both exist)
     - Best iteration found per framework
@@ -229,7 +243,6 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
     - Population quality comparison (pop size, best/median/worst scores, spread)
     - Key takeaways comparing accuracy vs cost tradeoffs
     - Experiment configuration (seed, model, api_base, temperature, inference-sim commit)
-    - Reference template: `outputs/blis_router/20260304_182612/analysis.md`
 
     **CRITICAL**: When adding a framework to an existing experiment, update ALL tables and findings in `analysis.md` — do not leave stale data from before the new framework was added.
 
@@ -327,11 +340,13 @@ uv run skydiscover-run \
 
 ## Workloads
 
-| Workload | Tests | Typical Baseline E2E (Llama) |
-|----------|-------|---------------------|
-| cache_warmup | Prefix cache effectiveness under warming | ~5554ms |
-| load_spikes | Routing under bursty arrivals | ~3188ms |
-| multiturn | Session-aware routing for multi-turn conversations | ~162ms |
+| Workload | Tests |
+|----------|-------|
+| cache_warmup | Load balance vs prefix-affinity when 3 prefix groups create imbalance across 4 instances |
+| load_spikes | Routing under bursty arrivals when one prefix group gets 50% of traffic |
+| multiturn | Session stickiness for multi-turn conversations with large prefix caches |
+
+Baseline latencies vary by model configuration — run `compare_results.py` after an experiment for exact numbers.
 
 ## Post-Experiment Analysis
 

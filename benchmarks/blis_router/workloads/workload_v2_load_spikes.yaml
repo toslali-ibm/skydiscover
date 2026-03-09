@@ -1,37 +1,15 @@
-# V2 Workload: Heavy-Hitter Prefix with Bursty Arrival
-# PURPOSE: Create TENSION between prefix-affinity and load-balance.
+# Load Spikes — Heavy-Hitter Prefix with Bursty Arrival
 #
-# WHAT THIS STRESSES: Load imbalance when one prefix group dominates traffic.
-#   50% of ALL traffic shares one large prefix (512 tokens). Prefix-affinity
-#   wants to send all of it to one instance (the one that cached this prefix),
-#   creating massive 2x overload on that instance. Meanwhile, realtime traffic
-#   needs low-load instances. A good router must avoid prefix-affinity trap.
+# Tests routing under load spikes when one prefix group dominates traffic.
+# 50% of all traffic shares one large prefix, arriving in bursts (gamma CV=3).
+# Prefix-affinity wants to pile it all onto one instance, creating 2x overload.
+# A good router must spread load despite cache affinity.
 #
-# KEY DESIGN CHOICES:
-#   - 50% heavy-hitter: one prefix group gets HALF of all traffic. This is the
-#     worst case for prefix-affinity (concentrates load on one instance).
-#   - Bursty arrival (gamma CV=3): traffic arrives in bursts, making load spikes
-#     worse when concentrated on one instance.
-#   - 25% realtime (no prefix): these requests need idle instances and will
-#     suffer if routed to the overloaded prefix-heavy instance.
-#   - 25% different prefix group: tests whether router can maintain SEPARATE
-#     cache affinity while managing the heavy group's load impact.
-#
-# VALIDATED RESULTS:
-#   - sabotaged: +416% (routing matters enormously)
-#   - prefix-only: +113% (terrible! concentrates 50% on one instance)
-#   - load-only: +2% (near-optimal, spreads traffic evenly)
-#   - baseline: 0% (reference -- load-balance component saves it from prefix trap)
-#   - oracle: -1.5% (slightly better than baseline)
-#   Conclusion: prefix-affinity is HARMFUL here. Load-balance is essential.
-#
-# DESIGN:
-#   - 18000 requests at rate=300 -> 60 seconds simulated time
-#   - 50% heavy-prefix bursty traffic (gamma CV=3, prefix=512)
-#   - 25% realtime SLO-critical (no prefix, needs idle instances)
-#   - 25% different prefix group (should use its own cached instance)
-#   - Higher rate than cache_warmup so gamma bursts create queueing crises
-#     where smart routing under pressure matters (14B P99 ~11s during spikes)
+# 18,000 requests at 300 req/s (60 seconds simulated).
+# Request mix:
+#   - 50% heavy-prefix batch (512 token prefix, input ~400 tokens, output ~120 tokens, bursty gamma CV=3)
+#   - 25% realtime no-prefix (input ~80 tokens, output ~30 tokens, streaming, needs low latency)
+#   - 25% light-prefix interactive (384 token prefix, input ~200 tokens, output ~60 tokens, steady poisson)
 
 version: "1"
 seed: 42

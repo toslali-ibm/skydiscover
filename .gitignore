@@ -40,6 +40,10 @@ outputs*/
 outputs_*/
 
 
+# BLIS router
+benchmarks/blis_router/inference-sim/simulation_worker
+PROMPTS.md
+
 # Benchmark generated data
 benchmarks/image_gen/sky_festival/sky_festival_output/
 benchmarks/image_gen/sky_festival/sky_festival_paradigm_output_*/
