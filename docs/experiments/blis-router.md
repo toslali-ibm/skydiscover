@@ -104,7 +104,7 @@ uv run skydiscover-run \
 
 Reproducibility is guaranteed by three seed layers:
 
-1. **BLIS simulation seed** (`BLIS_SEED` env var, default `42`): Controls workload generation (request arrivals, token counts). Passed as `--seed` to every BLIS simulation run. Also hardcoded in each workload YAML (`seed: 42`).
+1. **BLIS simulation seed** (`BLIS_SEED` env var, default `42,456` — two seeds): Controls workload generation (request arrivals, token counts). Passed as `--seed` to every BLIS simulation run. By default, each evaluation runs against two seeds: `42` (normal behavior) and `456` (exposes baseline load-balance saturation under bursty traffic). Set `BLIS_SEED=42` for single-seed backward compatibility, or `BLIS_SEED=42,456,789` for custom multi-seed. Results are averaged across all seeds.
 
 2. **SkyDiscover random seed** (`random_seed` in config.yaml, default `42`): Controls search algorithm randomness (island selection, mutation sampling, etc.).
 
@@ -148,7 +148,7 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 
 ### During Experiments
 
-4. Run frameworks **sequentially** (adaevolve → evox → openevolve → gepa → shinkaevolve). They share `routing.go` and cannot run in parallel.
+4. Run frameworks **sequentially** (openevolve → evox → adaevolve → gepa_native). They share `routing.go` and cannot run in parallel. **Use `openevolve` (external backend), NOT `openevolve_native`** — the native reimplementation has a strict diff parser that produces ~85% Go build errors.
 5. Always set `BLIS_OUTPUT_DIR` to the experiment output directory before calling `skydiscover-run`.
 6. Always set `BLIS_SEED` for reproducibility. Optionally set `BLIS_MULTI_LLM=1` to test against multiple LLMs. Set `BLIS_NUM_INSTANCES` to override the default 4 instances.
 7. **Monitor every 2 minutes** while a framework is running. Set up a background `sleep 120` loop and check the framework's log file after each interval. Every update to the user MUST include:
@@ -263,7 +263,17 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
             print(f'  Updated {fw.name}/best/best_program_info.json')
     "
     ```
-12. Do NOT delete or modify output directories — they are the permanent record.
+12. **Robustness validation** (recommended before transferring algorithms): Re-evaluate best programs across multiple seeds to detect overfitting:
+    ```bash
+    python benchmarks/blis_router/scripts/validate_robustness.py "$RESULTS_DIR"
+    # Runs both single-LLM and multi-LLM by default (3 seeds × 5 programs × 2 modes)
+    # Options:
+    #   --seeds 42,123,456,789    (custom seeds)
+    #   --single-llm-only         (faster: skip multi-LLM)
+    #   --multi-llm-only          (only multi-LLM)
+    ```
+    Output goes to `<results_dir>/robustness/` with JSON + CSV. Look for frameworks where cross-seed stddev is low and mean improvement remains high.
+13. Do NOT delete or modify output directories — they are the permanent record.
 
 ## Scoring
 
@@ -272,17 +282,18 @@ score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms
 ```
 
 - Higher is better (less negative = lower latency)
-- Tested on 3 workloads: cache_warmup, load_spikes, multiturn
-- With `BLIS_MULTI_LLM=1`: averaged across 2 models × 3 workloads
+- Tested on 3 workloads × N seeds (default 2 seeds: 42, 456): cache_warmup, load_spikes, multiturn
+- With `BLIS_MULTI_LLM=1`: averaged across N seeds × 2 models × 3 workloads
 - Baseline score (single LLM): approximately -4487
 - Baseline score (multi-LLM): approximately -7121
 
 ## Multi-LLM Evaluation
 
-By default, the evaluator tests against a single LLM (Llama 8B, blackbox coefficients). Set `BLIS_MULTI_LLM=1` to also test against Mixtral 8x7B MoE (crossmodel estimator), validating that discovered algorithms generalize across dense and MoE architectures.
+By default, the evaluator tests against two LLMs (qwen_7b + qwen_14b) to validate that discovered algorithms generalize across model sizes. Set `BLIS_MULTI_LLM=0` to use only qwen_7b for faster iterations.
 
 ```bash
-export BLIS_MULTI_LLM=1
+# Multi-LLM is ON by default. To disable:
+export BLIS_MULTI_LLM=0
 export BLIS_OUTPUT_DIR="outputs/blis_router/${EXPERIMENT}/<FRAMEWORK>"
 export BLIS_SEED="42"
 ```
@@ -292,9 +303,10 @@ export BLIS_SEED="42"
 | `llama_8b` | `meta-llama/llama-3.1-8b-instruct` | blackbox (trained coefficients) | H100, TP=1 |
 | `mixtral_8x7b` | `mistralai/mixtral-8x7b-instruct-v0.1` | crossmodel (physics-informed, MoE-aware) | H100, TP=2 |
 
-When multi-LLM is enabled:
-- Each evaluation runs 6 simulations (2 models × 3 workloads) instead of 3
-- Evaluation time roughly doubles (~6-9s per iteration instead of ~3-4s)
+With default settings (multi-LLM ON, two seeds):
+- Each evaluation runs 12 simulations (2 seeds × 2 models × 3 workloads)
+- Evaluation time: ~24-48s per iteration depending on system load
+- With single-LLM (`BLIS_MULTI_LLM=0`): 6 sims, ~12-24s
 - `baseline_metrics.json` includes a `per_model` key with full per-model per-workload breakdowns
 - The combined score and per-workload values in the evaluate return dict are averaged across models
 - Analysis scripts work unchanged — they read the same top-level fields

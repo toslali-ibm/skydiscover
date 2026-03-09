@@ -1,4 +1,5 @@
-language: python
+language: go
+file_suffix: .go
 diff_based_generation: true
 max_iterations: 50
 checkpoint_interval: 5
@@ -24,6 +25,10 @@ prompt:
 
     BASELINE: Fixed equal weights [1.0, 1.0] on two scorers (prefix-affinity, load-balance).
     The weights never adapt to request or system state.
+    KNOWN WEAKNESS: The load-balance scorer uses 1/(1+load), which saturates at high load —
+    the signal difference between load 50 and 51 is <0.001, while prefix-affinity gives a
+    constant ~0.28 bonus. Under bursty traffic, this lets one instance accumulate all
+    prefix-heavy requests. Improving load-awareness is a key opportunity.
 
     AVAILABLE SIGNALS — from request (req):
       - len(req.InputTokens): input size

@@ -5,15 +5,21 @@ Evaluates evolved routing algorithms by:
 1. Extracting Go code from Python wrapper
 2. Writing evolved routing.go to BLIS source (restored after evaluation)
 3. Building BLIS
-4. Running simulations on 3 routing-sensitive v2 workloads (optionally x N LLMs)
-5. Computing score based on average end-to-end latency
+4. Running simulations on N seeds × N LLMs × 3 workloads (default: 2 seeds × 2 LLMs × 3 = 12 sims)
+5. Computing score based on average end-to-end latency across all seeds/models/workloads
 
 Score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms (higher = better)
 
-Multi-LLM mode (BLIS_MULTI_LLM=1):
-  Runs each workload against multiple LLM model configurations to test
-  generalizability. The combined score averages across all models and workloads.
-  Baseline metrics include per-model breakdowns.
+Multi-seed evaluation (default: seeds 42 and 456):
+  Every candidate is tested against multiple simulation seeds to ensure
+  robustness. Seed 42 is the normal case; seed 456 exposes baseline degradation
+  under bursty traffic (load-balance scorer saturates). Set BLIS_SEED=42 for
+  single-seed backward compatibility, or BLIS_SEED=42,456 for explicit multi-seed.
+
+Multi-LLM mode (default ON, disable with BLIS_MULTI_LLM=0):
+  Runs each workload against multiple LLM model configurations (qwen_7b + qwen_14b)
+  to test generalizability. The combined score averages across all seeds, models,
+  and workloads. Baseline metrics include per-model breakdowns.
 
 Experiment isolation:
 - routing.go is saved before and restored after every evaluation
@@ -50,9 +56,14 @@ _MODEL_QWEN_14B = ("qwen_14b", "qwen/qwen3-14b", [
     "--hardware", "H100", "--tp", "1",
 ])
 
-SIM_SEED = os.environ.get("BLIS_SEED", "42")
+_DEFAULT_SEEDS = ["42", "456"]
+SIM_SEEDS = (
+    os.environ.get("BLIS_SEED", "").split(",")
+    if os.environ.get("BLIS_SEED")
+    else _DEFAULT_SEEDS
+)
 SIM_NUM_INSTANCES = os.environ.get("BLIS_NUM_INSTANCES", "4")
-MULTI_LLM = os.environ.get("BLIS_MULTI_LLM", "0") == "1"
+MULTI_LLM = os.environ.get("BLIS_MULTI_LLM", "1") == "1"
 # Snapshot refresh interval in microseconds (5 seconds = realistic Prometheus scrape)
 SIM_SNAPSHOT_REFRESH = os.environ.get("BLIS_SNAPSHOT_REFRESH", "5000000")
 
@@ -81,7 +92,7 @@ def _get_output_dir() -> Path:
 
 def _build_sim_cmd(
     inference_sim_dir: Path, policy_config_path: Path, workload_path: Path,
-    model_id: str, extra_args: list[str],
+    model_id: str, extra_args: list[str], seed: str,
 ) -> list[str]:
     return [
         "./simulation_worker", "run",
@@ -91,7 +102,7 @@ def _build_sim_cmd(
         "--workload-spec", str(workload_path),
         "--snapshot-refresh-interval", SIM_SNAPSHOT_REFRESH,
         "--log", "info",
-        "--seed", SIM_SEED,
+        "--seed", seed,
     ] + extra_args
 
 
@@ -183,61 +194,77 @@ def _error_result(error_msg: str, error_type: str, suggestion: str = "", **extra
 
 def _run_workloads(
     models, script_dir: Path, inference_sim_dir: Path, policy_config_path: Path,
+    seeds: list[str],
 ) -> tuple[list[float], list[float], dict, dict]:
-    """Run all workloads across all models. Returns (latencies, tail_latencies, workload_results, per_model)."""
+    """Run all workloads across all seeds and models.
+
+    Returns (latencies, tail_latencies, workload_results, per_model).
+    All results are averaged across seeds × models.
+    """
     all_latencies = []
     all_tail_latencies = []
     per_model = {}
-    # Aggregate per-workload across models (for evaluate() return value)
+    # Aggregate per-workload across seeds and models (for evaluate() return value)
     workload_agg: dict[str, list[dict]] = {wl: [] for wl, _ in WORKLOADS}
 
     for model_name, model_id, extra_args in models:
         model_latencies = []
         model_tail_latencies = []
-        model_workloads = {}
+        model_workloads: dict[str, list[dict]] = {wl: [] for wl, _ in WORKLOADS}
 
-        for workload_name, workload_file in WORKLOADS:
-            workload_path = script_dir / "workloads" / workload_file
-            cmd = _build_sim_cmd(
-                inference_sim_dir, policy_config_path, workload_path,
-                model_id, extra_args,
-            )
-            log_key = f"{model_name}/{workload_name}" if len(models) > 1 else workload_name
-            try:
-                sim_result = subprocess.run(
-                    cmd, cwd=inference_sim_dir, capture_output=True, text=True, timeout=120,
+        for seed in seeds:
+            for workload_name, workload_file in WORKLOADS:
+                workload_path = script_dir / "workloads" / workload_file
+                cmd = _build_sim_cmd(
+                    inference_sim_dir, policy_config_path, workload_path,
+                    model_id, extra_args, seed=seed,
                 )
-                if sim_result.returncode != 0:
-                    logger.warning("%s failed: %s", log_key, sim_result.stderr[:300])
-                    model_workloads[workload_name] = {"e2e_ms": None, "error": "Simulation failed"}
-                    continue
-                output_text = sim_result.stdout + (sim_result.stderr or "")
-                cluster_metrics = _parse_cluster_metrics(output_text)
-                if cluster_metrics and "e2e_mean_ms" in cluster_metrics:
-                    e2e_ms = float(cluster_metrics["e2e_mean_ms"])
-                    e2e_p95_ms = float(cluster_metrics.get("e2e_p95_ms", e2e_ms))
-                    model_latencies.append(e2e_ms)
-                    model_tail_latencies.append(e2e_p95_ms)
-                    entry = {
-                        "e2e_ms": e2e_ms, "e2e_p95_ms": e2e_p95_ms,
-                        "completed_requests": cluster_metrics.get("completed_requests"),
-                        "ttft_mean_ms": cluster_metrics.get("ttft_mean_ms"),
-                        "tokens_per_sec": cluster_metrics.get("tokens_per_sec"),
-                    }
-                    model_workloads[workload_name] = entry
-                    workload_agg[workload_name].append(entry)
-                    logger.info(f"{log_key}: e2e_mean={e2e_ms:.2f}ms, p95={e2e_p95_ms:.2f}ms")
-                else:
-                    logger.warning("%s: no cluster metrics found", log_key)
-                    model_workloads[workload_name] = {"e2e_ms": None, "error": "No cluster metrics"}
-            except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError) as exc:
-                logger.warning("%s failed: %s", log_key, exc)
-                model_workloads[workload_name] = {"e2e_ms": None, "error": str(exc)}
-            except Exception as exc:
-                logger.error("Unexpected error in %s: %s", log_key, exc, exc_info=True)
-                model_workloads[workload_name] = {"e2e_ms": None, "error": f"Unexpected: {exc}"}
+                seed_tag = f"[seed={seed}]" if len(seeds) > 1 else ""
+                model_tag = f"{model_name}/" if len(models) > 1 else ""
+                log_key = f"{model_tag}{workload_name}{seed_tag}"
+                try:
+                    sim_result = subprocess.run(
+                        cmd, cwd=inference_sim_dir, capture_output=True, text=True, timeout=120,
+                    )
+                    if sim_result.returncode != 0:
+                        logger.warning("%s failed: %s", log_key, sim_result.stderr[:300])
+                        continue
+                    output_text = sim_result.stdout + (sim_result.stderr or "")
+                    cluster_metrics = _parse_cluster_metrics(output_text)
+                    if cluster_metrics and "e2e_mean_ms" in cluster_metrics:
+                        e2e_ms = float(cluster_metrics["e2e_mean_ms"])
+                        e2e_p95_ms = float(cluster_metrics.get("e2e_p95_ms", e2e_ms))
+                        model_latencies.append(e2e_ms)
+                        model_tail_latencies.append(e2e_p95_ms)
+                        entry = {
+                            "e2e_ms": e2e_ms, "e2e_p95_ms": e2e_p95_ms,
+                            "completed_requests": cluster_metrics.get("completed_requests"),
+                            "ttft_mean_ms": cluster_metrics.get("ttft_mean_ms"),
+                            "tokens_per_sec": cluster_metrics.get("tokens_per_sec"),
+                        }
+                        model_workloads[workload_name].append(entry)
+                        workload_agg[workload_name].append(entry)
+                        logger.info(f"{log_key}: e2e_mean={e2e_ms:.2f}ms, p95={e2e_p95_ms:.2f}ms")
+                    else:
+                        logger.warning("%s: no cluster metrics found", log_key)
+                except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError) as exc:
+                    logger.warning("%s failed: %s", log_key, exc)
+                except Exception as exc:
+                    logger.error("Unexpected error in %s: %s", log_key, exc, exc_info=True)
 
-        per_model_entry = {"model_id": model_id, "workloads": model_workloads}
+        per_model_entry = {"model_id": model_id, "workloads": {}}
+        for wl_name, entries in model_workloads.items():
+            if entries:
+                avg_e2e = sum(e["e2e_ms"] for e in entries) / len(entries)
+                avg_p95 = sum(e["e2e_p95_ms"] for e in entries) / len(entries)
+                per_model_entry["workloads"][wl_name] = {
+                    "e2e_ms": avg_e2e, "e2e_p95_ms": avg_p95,
+                    "completed_requests": entries[0].get("completed_requests"),
+                    "ttft_mean_ms": entries[0].get("ttft_mean_ms"),
+                    "tokens_per_sec": entries[0].get("tokens_per_sec"),
+                }
+            else:
+                per_model_entry["workloads"][wl_name] = {"e2e_ms": None, "error": "All seeds failed"}
         if model_latencies:
             per_model_entry["avg_e2e_ms"] = sum(model_latencies) / len(model_latencies)
             per_model_entry["avg_p95_ms"] = sum(model_tail_latencies) / len(model_tail_latencies)
@@ -245,7 +272,7 @@ def _run_workloads(
         all_latencies.extend(model_latencies)
         all_tail_latencies.extend(model_tail_latencies)
 
-    # Build per-workload aggregate (average across models)
+    # Build per-workload aggregate (average across seeds and models)
     workload_results = {}
     for workload_name, entries in workload_agg.items():
         if entries:
@@ -258,7 +285,7 @@ def _run_workloads(
                 "tokens_per_sec": entries[0].get("tokens_per_sec"),
             }
         else:
-            workload_results[workload_name] = {"e2e_ms": None, "error": "All models failed"}
+            workload_results[workload_name] = {"e2e_ms": None, "error": "All seeds/models failed"}
 
     return all_latencies, all_tail_latencies, workload_results, per_model
 
@@ -270,18 +297,25 @@ def get_or_compute_baseline(
     output_dir = _get_output_dir()
     cache_path = output_dir / "baseline_metrics.json"
 
-    # Try to load from cache (no TOCTOU — rely on exception handling)
+    # Try to load from cache; recompute if seeds changed
     try:
         with open(cache_path, "r") as f:
-            return json.load(f)
+            cached = json.load(f)
+        cached_seeds = cached.get("seeds")
+        if cached_seeds == sorted(SIM_SEEDS):
+            return cached
+        logger.info("Baseline seeds changed (%s -> %s), recomputing", cached_seeds, sorted(SIM_SEEDS))
     except FileNotFoundError:
         pass  # No cache yet, will compute below
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to read baseline cache, recomputing: %s", exc)
 
-    initial_program_path = script_dir / "initial_program.py"
+    # Try .go first (native Go), fall back to .py (legacy Python wrapper)
+    initial_program_path = script_dir / "initial_program.go"
     if not initial_program_path.exists():
-        logger.warning("initial_program.py not found; cannot compute baseline")
+        initial_program_path = script_dir / "initial_program.py"
+    if not initial_program_path.exists():
+        logger.warning("initial_program not found; cannot compute baseline")
         return {}
 
     with open(initial_program_path, "r") as f:
@@ -313,10 +347,11 @@ def get_or_compute_baseline(
         models = _get_models()
         all_latencies, all_tail_latencies, workload_results, per_model = _run_workloads(
             models, script_dir, inference_sim_dir, policy_config_path,
+            seeds=SIM_SEEDS,
         )
 
-        baseline = {}
-        # Per-workload (averaged across models)
+        baseline = {"seeds": sorted(SIM_SEEDS)}
+        # Per-workload (averaged across seeds and models)
         for wl_name, wl_data in workload_results.items():
             if wl_data.get("e2e_ms") is not None:
                 baseline[f"{wl_name}_e2e_ms"] = wl_data["e2e_ms"]
@@ -391,7 +426,9 @@ def evaluate(program_path: str) -> dict:
     logger.info(f"Extracted Go code: {len(go_code)} chars")
 
     try:
-        initial_program_path = script_dir / "initial_program.py"
+        initial_program_path = script_dir / "initial_program.go"
+        if not initial_program_path.exists():
+            initial_program_path = script_dir / "initial_program.py"
         if initial_program_path.exists():
             with open(initial_program_path, "r") as f:
                 initial_go_code = extract_go_code(f.read())
@@ -439,6 +476,7 @@ def evaluate(program_path: str) -> dict:
         models = _get_models()
         all_latencies, all_tail_latencies, workload_results, _ = _run_workloads(
             models, script_dir, inference_sim_dir, policy_config_path,
+            seeds=SIM_SEEDS,
         )
 
         failed_workloads = [wl for wl, d in workload_results.items() if d.get("e2e_ms") is None]
@@ -454,7 +492,7 @@ def evaluate(program_path: str) -> dict:
         avg_tail_latency = sum(all_tail_latencies) / len(all_tail_latencies)
 
         score = -0.5 * avg_latency - 0.5 * avg_tail_latency
-        total_runs = len(models) * len(WORKLOADS)
+        total_runs = len(SIM_SEEDS) * len(models) * len(WORKLOADS)
         num_successful = len(all_latencies)
         success_rate = num_successful / total_runs
 
@@ -485,9 +523,12 @@ def evaluate(program_path: str) -> dict:
 
 
 if __name__ == "__main__":
-    print("Testing evaluator with initial program...")
+    print(f"Testing evaluator with initial program (seeds={SIM_SEEDS})...")
     script_dir = Path(__file__).parent
-    result = evaluate(str(script_dir / "initial_program.py"))
+    prog = script_dir / "initial_program.go"
+    if not prog.exists():
+        prog = script_dir / "initial_program.py"
+    result = evaluate(str(prog))
     if "error" in result:
         print(f"  ERROR: {result['error']}")
         print(f"  Suggestion: {result.get('artifacts', {}).get('suggestion', 'N/A')}")

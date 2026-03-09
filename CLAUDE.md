@@ -58,12 +58,12 @@ EXPERIMENT="$(date +%y%m%d)_<N>i_<TAG>"
 
 # 4. Run a single framework
 export BLIS_OUTPUT_DIR="outputs/blis_router/${EXPERIMENT}/<FRAMEWORK>"
-export BLIS_SEED="42"
-# Optional: export BLIS_MULTI_LLM=1  # test against Llama 8B + Mixtral 8x7B MoE
+export BLIS_SEED="42"  # single seed; omit for default two-seed (42,456)
+# Multi-LLM is ON by default (qwen_7b + qwen_14b). To disable: export BLIS_MULTI_LLM=0
 # Optional: export BLIS_NUM_INSTANCES=4  # default cluster size
 mkdir -p "$BLIS_OUTPUT_DIR"
 uv run skydiscover-run \
-  benchmarks/blis_router/initial_program.py \
+  benchmarks/blis_router/initial_program.go \
   benchmarks/blis_router/evaluator.py \
   -c benchmarks/blis_router/config.yaml \
   -s <FRAMEWORK> \
@@ -76,14 +76,17 @@ cd benchmarks/blis_router/inference-sim && git diff sim/routing.go  # must be em
 ls benchmarks/blis_router/baseline_metrics.json 2>/dev/null         # must not exist
 ```
 
-**Available frameworks**: `adaevolve`, `evox`, `openevolve_native`, `gepa_native`, `shinkaevolve`, `topk`, `best_of_n`, `beam_search`
+**Available frameworks**: `adaevolve`, `evox`, `openevolve`, `gepa_native`, `shinkaevolve`, `topk`, `best_of_n`, `beam_search`
+
+**Framework notes**:
+- Use `openevolve` (external backend), NOT `openevolve_native`. The native reimplementation has a strict diff parser that produces ~85% Go build errors. The external backend uses fuzzy matching and has 0% error rate.
 
 **Common pitfalls**:
 - `uv` not found → `pip3 install uv`
 - `Provider 'aws' requires api_base` → do NOT use `-m` flag; models are in config.yaml
 - EvoX 401 errors on label generation → fixed in `search/evox/controller.py` (propagates parent LLM config to search controller). If this recurs, the search controller's LLM config is being loaded from `search/evox/config/search.yaml` which defaults to OpenAI — the fix is to propagate `self.config.llm` to `controller_input.config.llm` in `_init_search_evolution_controller()`.
 - ShinkaEvolve (`-s shinkaevolve`) is **currently blocked** — it requires an embedding model (`text-embedding-3-small`) for code deduplication, and the IBM LiteLLM proxy does not serve embedding models. Do NOT attempt to run ShinkaEvolve until this is resolved. See [ShinkaEvolve Setup](docs/experiments/blis-router.md#shinkaevolve-setup) for details and unblocking options. Also requires `max_parallel_jobs: 1` for BLIS router.
-- Experiments take ~30s per iteration (LLM call + Go build + 3 workload simulations). With `BLIS_MULTI_LLM=1`, ~45s (6 workload simulations across 2 LLMs)
+- Experiments take ~60s per iteration by default (LLM call + Go build + 12 simulations: 2 seeds × 2 LLMs × 3 workloads). With single-LLM (`BLIS_MULTI_LLM=0`), ~40s. With single seed + single LLM, ~30s
 
 ## Project Structure (top-level)
 
@@ -133,9 +136,9 @@ When running BLIS router experiments, Claude sessions MUST follow these rules:
 
 ### Mandatory During Experiments
 
-4. **Sequential execution only**: Run frameworks one at a time (adaevolve → evox → openevolve → gepa → shinkaevolve). They share `routing.go` and CANNOT run in parallel.
+4. **Sequential execution only**: Run frameworks one at a time (openevolve → evox → adaevolve → gepa_native). They share `routing.go` and CANNOT run in parallel.
 5. **Always set `BLIS_OUTPUT_DIR`**: Every experiment's artifacts (baseline, logs) go to its own output directory. NEVER write to the benchmark directory.
-6. **Always set `BLIS_SEED`**: For reproducibility. Default is 42. Record the seed with results.
+6. **Always set `BLIS_SEED`** (or use default): Default is two seeds `42,456` for robustness. Set `BLIS_SEED=42` for single-seed backward compat, or `BLIS_SEED=42,456,789` for custom multi-seed. Record the seed(s) with results.
 7. **Monitor every 2 minutes** while a framework is running. Use `sleep 120` in a background task, then check the log and report to the user. Each update MUST include:
    - **Validity**: any errors in logs? (build failures, 401s, crashes). Count of successful vs failed iterations.
    - **Progress**: iterations completed / total, best score so far, % improvement vs baseline
@@ -168,4 +171,9 @@ When running BLIS router experiments, Claude sessions MUST follow these rules:
    ```
 10. **Write or update `analysis.md`** in output dir. **Every number MUST come from script output or JSON files — never compute numbers manually.** Use `comparison_table.csv` for all per-workload and aggregate numbers (it includes the baseline row). Use `effort_analysis.json` for effort metrics. If a number isn't in any script output, add it to the script first. Must include: accuracy tables, per-workload E2E table, per-workload P95 table, % improvement, effort summary, search efficiency, convergence, population quality, key takeaways, experiment config. **CRITICAL**: When adding a framework to an existing experiment, update ALL tables — do not leave stale data. See [blis-router.md](docs/experiments/blis-router.md#after-experiments-run-all-steps--even-when-adding-one-framework-to-an-existing-experiment) for full checklist.
 11. **Merge baseline metrics into best_program_info.json**: For each framework, copy the contents of `<framework>/baseline_metrics.json` into `<framework>/best/best_program_info.json` as a new top-level `"baseline_metrics"` key. This makes each best program self-contained for downstream comparison.
-12. **Never delete output directories** — they are the permanent experimental record
+12. **Robustness validation** (recommended before transferring algorithms):
+   ```bash
+   python benchmarks/blis_router/scripts/validate_robustness.py "$RESULTS_DIR"
+   # Runs single-LLM + multi-LLM × 3 seeds by default. Use --single-llm-only or --multi-llm-only for faster runs.
+   ```
+13. **Never delete output directories** — they are the permanent experimental record

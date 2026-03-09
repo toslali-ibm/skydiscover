@@ -1,14 +1,4 @@
-"""
-Initial Program: BLIS Router Weight Optimization
-
-This contains the full routing.go file (synced with inference-sim HEAD)
-with EVOLVE-BLOCK markers around the WeightedScoring logic.
-
-Goal: Evolve the routing policy to minimize end-to-end latency across workloads.
-"""
-
-# Full routing.go file with EVOLVE-BLOCK markers (synced with inference-sim HEAD)
-GO_ROUTING_CODE = """package sim
+package sim
 
 import (
 	"fmt"
@@ -273,8 +263,3 @@ func NewRoutingPolicy(name string, scorerConfigs []ScorerConfig, blockSize int64
 		panic(fmt.Sprintf("unhandled routing policy %q", name))
 	}
 }
-"""
-
-# This will be used as the initial program for SkyDiscover
-if __name__ == "__main__":
-    print(GO_ROUTING_CODE)

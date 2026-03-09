@@ -6,7 +6,7 @@ End-to-end validation of the BLIS router benchmark pipeline.
 Run this after any important code changes to verify nothing is broken.
 
 Tests:
-  1. Go code extraction from initial_program.py
+  1. Go code extraction from initial_program.go
   2. EVOLVE-BLOCK marker detection
   3. Go build with extracted code
   4. Full evaluation (3 workloads) with baseline program
@@ -52,11 +52,11 @@ def file_hash(path: Path) -> str:
 
 
 def test_go_code_extraction():
-    """Test 1: Extract Go code from initial_program.py."""
+    """Test 1: Extract Go code from initial_program.go."""
     print("\n--- Test 1: Go Code Extraction ---")
     from evaluator import extract_go_code
 
-    with open(BENCHMARK_DIR / "initial_program.py") as f:
+    with open(BENCHMARK_DIR / "initial_program.go") as f:
         text = f.read()
 
     go_code = extract_go_code(text)
@@ -121,7 +121,7 @@ def test_full_evaluation():
     os.environ["BLIS_OUTPUT_DIR"] = eval_output_dir
 
     try:
-        result = evaluate(str(BENCHMARK_DIR / "initial_program.py"))
+        result = evaluate(str(BENCHMARK_DIR / "initial_program.go"))
 
         score = result.get("combined_score")
         avg_e2e = result.get("avg_e2e_ms")
@@ -176,7 +176,7 @@ def test_isolation():
 
     try:
         from evaluator import evaluate
-        evaluate(str(BENCHMARK_DIR / "initial_program.py"))
+        evaluate(str(BENCHMARK_DIR / "initial_program.go"))
     finally:
         shutil.rmtree(eval_output_dir, ignore_errors=True)
         os.environ.pop("BLIS_OUTPUT_DIR", None)
