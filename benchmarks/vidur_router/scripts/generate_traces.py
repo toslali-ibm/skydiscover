@@ -195,7 +195,7 @@ def generate_trace_for_workload(
             max_rounds = mt["max_rounds"]
             # Number of sessions: total requests from this group / rounds per session
             n_client_requests = int(num_requests * rate_fraction)
-            n_sessions = max(1, n_client_requests // max_rounds)
+            n_sessions = max(1, math.ceil(n_client_requests / max_rounds))
             session_rate = client_rate / max_rounds
 
             session_arrivals = _generate_arrivals(
