@@ -28,6 +28,7 @@ Generated from BLIS workload YAML specifications by `scripts/generate_traces.py`
 
 ## Load Calibration
 
-BLIS workload rates (200/300/150 req/s) may not be appropriate for Vidur's execution model.
-Use `time_scale_factor` in the evaluator to calibrate per-workload utilization.
-Target ~70-80% utilization so routing decisions matter.
+BLIS workload rates (200/300/150 req/s) overwhelm Vidur's 4-replica cluster.
+By default, traces are generated with calibrated rates (~10-17 QPS) and
+reduced request counts (~400-500) so simulations complete in ~30-60s with
+E2E latencies of 500-1500ms. Use `--no-calibrate` for raw BLIS rates.

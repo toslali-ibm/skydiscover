@@ -26,6 +26,18 @@ WORKLOAD_FILES = [
 
 DEFAULT_SEEDS = [42, 456]
 
+# Calibrated parameters for Vidur's 4-replica Llama-2-7B-on-A100 cluster.
+# Derived from calibration study (calibrate_load_v3.py) targeting E2E 500-1500ms.
+# Original BLIS rates (185-276 QPS) overwhelm Vidur; these scale down to ~10-15 QPS.
+VIDUR_CALIBRATION = {
+    "cache_warmup": {"num_requests": 500, "rate_scale": 12.0},  # 200/12 ≈ 17 QPS
+    "load_spikes":  {"num_requests": 500, "rate_scale": 18.0},  # 300/18 ≈ 17 QPS
+    "multiturn":    {"num_requests": 400, "rate_scale": 12.0},  # 150/12 ≈ 12 QPS
+}
+
+# Max position embeddings for target models (Llama-2-7B, Llama-3-8B)
+MAX_MODEL_TOKENS = 4096
+
 
 def _sample_distribution(rng: np.random.Generator, dist: dict, n: int) -> np.ndarray:
     """Sample n values from a BLIS token distribution spec."""
@@ -111,6 +123,13 @@ def _generate_multiturn_requests(
             prefill_tokens = prefix_length + accumulated_context + new_input
             decode_tokens = new_output
 
+            # Clip to model context limit (prefill + decode must fit)
+            if prefill_tokens + decode_tokens > MAX_MODEL_TOKENS:
+                prefill_tokens = min(prefill_tokens, MAX_MODEL_TOKENS - decode_tokens)
+                if prefill_tokens < 1:
+                    prefill_tokens = 1
+                    decode_tokens = min(decode_tokens, MAX_MODEL_TOKENS - 1)
+
             rows.append({
                 "arrived_at": arrived_at,
                 "num_prefill_tokens": max(1, prefill_tokens),
@@ -128,8 +147,14 @@ def generate_trace_for_workload(
     workload_name: str,
     workload_path: Path,
     seed: int,
+    calibrate: bool = True,
 ) -> list:
-    """Generate Vidur trace rows from a single BLIS workload YAML."""
+    """Generate Vidur trace rows from a single BLIS workload YAML.
+
+    If calibrate=True (default), applies per-workload rate scaling and request
+    count limits from VIDUR_CALIBRATION to produce traces that give reasonable
+    E2E latencies on Vidur's 4-replica cluster.
+    """
     with open(workload_path) as f:
         spec = yaml.safe_load(f)
 
@@ -137,6 +162,12 @@ def generate_trace_for_workload(
     num_requests = spec["num_requests"]
     clients = spec["clients"]
     is_multiturn = spec.get("category") == "reasoning"
+
+    # Apply Vidur calibration: scale down rate, cap request count
+    cal = VIDUR_CALIBRATION.get(workload_name, {}) if calibrate else {}
+    rate_scale = cal.get("rate_scale", 1.0)
+    aggregate_rate = aggregate_rate / rate_scale
+    num_requests = cal.get("num_requests", num_requests)
 
     all_rows = []
     master_rng = np.random.default_rng(seed)
@@ -223,13 +254,21 @@ def main():
         default=str(Path(__file__).resolve().parent.parent / "workloads"),
         help="Output directory for trace CSVs",
     )
+    parser.add_argument(
+        "--no-calibrate", action="store_true",
+        help="Disable Vidur calibration (use raw BLIS rates)",
+    )
     args = parser.parse_args()
 
     seeds = [int(s.strip()) for s in args.seeds.split(",")]
     output_dir = Path(args.output_dir)
+    calibrate = not args.no_calibrate
 
-    print(f"Generating traces for seeds {seeds} → {output_dir}")
+    mode = "calibrated for Vidur" if calibrate else "raw BLIS rates"
+    print(f"Generating traces for seeds {seeds} → {output_dir} ({mode})")
     print(f"BLIS workloads dir: {BLIS_WORKLOADS_DIR}")
+    if calibrate:
+        print(f"Calibration: {VIDUR_CALIBRATION}")
 
     for workload_name, yaml_file in WORKLOAD_FILES:
         yaml_path = BLIS_WORKLOADS_DIR / yaml_file
@@ -238,7 +277,7 @@ def main():
             sys.exit(1)
 
         for seed in seeds:
-            rows = generate_trace_for_workload(workload_name, yaml_path, seed)
+            rows = generate_trace_for_workload(workload_name, yaml_path, seed, calibrate=calibrate)
             csv_name = f"{workload_name}_seed{seed}.csv"
             csv_path = output_dir / csv_name
             write_trace_csv(rows, csv_path)
@@ -278,9 +317,10 @@ def main():
         "- Smaller improvements are expected and consistent with the reduced signal surface\n"
         "- Multi-turn sessions are flattened into independent requests with accumulated context\n\n"
         "## Load Calibration\n\n"
-        "BLIS workload rates (200/300/150 req/s) may not be appropriate for Vidur's execution model.\n"
-        "Use `time_scale_factor` in the evaluator to calibrate per-workload utilization.\n"
-        "Target ~70-80% utilization so routing decisions matter.\n"
+        "BLIS workload rates (200/300/150 req/s) overwhelm Vidur's 4-replica cluster.\n"
+        "By default, traces are generated with calibrated rates (~10-17 QPS) and\n"
+        "reduced request counts (~400-500) so simulations complete in ~30-60s with\n"
+        "E2E latencies of 500-1500ms. Use `--no-calibrate` for raw BLIS rates.\n"
     )
     print(f"\nWrote README to {readme_path}")
     print("Done!")
