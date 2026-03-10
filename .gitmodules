@@ -4,3 +4,6 @@
 [submodule "benchmarks/blis_router/inference-sim"]
 	path = benchmarks/blis_router/inference-sim
 	url = https://github.com/inference-sim/inference-sim.git
+[submodule "benchmarks/vidur_router/vidur"]
+	path = benchmarks/vidur_router/vidur
+	url = https://github.com/microsoft/vidur
