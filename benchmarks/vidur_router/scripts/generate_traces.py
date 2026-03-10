@@ -136,8 +136,10 @@ def _generate_multiturn_requests(
                 "num_decode_tokens": max(1, decode_tokens),
             })
 
-            accumulated_context += new_input + new_output
-            prev_output_tokens = new_output
+            # Use clipped values for context accumulation (not raw sampled values)
+            actual_input = prefill_tokens - prefix_length - accumulated_context
+            accumulated_context += max(0, actual_input) + decode_tokens
+            prev_output_tokens = decode_tokens
             prev_arrival = arrived_at
 
     return rows
@@ -218,10 +220,17 @@ def generate_trace_for_workload(
             rows = []
             for i in range(n_client_requests):
                 prefill = prefix_length + int(input_tokens[i])
+                decode = max(1, int(output_tokens[i]))
+                # Clip to model context limit
+                if prefill + decode > MAX_MODEL_TOKENS:
+                    prefill = min(prefill, MAX_MODEL_TOKENS - decode)
+                    if prefill < 1:
+                        prefill = 1
+                        decode = min(decode, MAX_MODEL_TOKENS - 1)
                 rows.append({
                     "arrived_at": float(arrivals[i]),
                     "num_prefill_tokens": max(1, prefill),
-                    "num_decode_tokens": max(1, int(output_tokens[i])),
+                    "num_decode_tokens": decode,
                 })
 
         all_rows.extend(rows)
