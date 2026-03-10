@@ -17,8 +17,17 @@ import yaml
 
 
 def extract_go_code(program_path: Path) -> str | None:
-    """Extract GO_ROUTING_CODE from a program file using regex."""
+    """Extract Go code from a program file.
+
+    Supports both native .go files and legacy .py files with GO_ROUTING_CODE wrapper.
+    """
     text = program_path.read_text()
+
+    # Native .go file — return the full content
+    if program_path.suffix == ".go":
+        return text
+
+    # Legacy .py file — extract GO_ROUTING_CODE
     match = re.search(r'GO_ROUTING_CODE\s*=\s*"""(.*?)"""', text, re.DOTALL)
     if match:
         return match.group(1)
@@ -32,8 +41,8 @@ def generate_diff(initial_code: str, best_code: str, framework: str) -> str:
     diff = difflib.unified_diff(
         initial_lines,
         best_lines,
-        fromfile=f"initial_program.py (GO_ROUTING_CODE)",
-        tofile=f"{framework}/best/best_program.py (GO_ROUTING_CODE)",
+        fromfile="initial_program.go",
+        tofile=f"{framework}/best/best_program.go",
     )
     return "".join(diff)
 
@@ -83,6 +92,30 @@ def explain_diffs_with_llm(diffs: dict[str, str]) -> str:
         return f"*LLM explanation unavailable: {e}*\n\nReview the diffs manually."
 
 
+def find_initial_program() -> Path:
+    """Find the initial program file (.go or .py)."""
+    base = Path(__file__).parent.parent
+    go_path = base / "initial_program.go"
+    py_path = base / "initial_program.py"
+    if go_path.exists():
+        return go_path
+    if py_path.exists():
+        return py_path
+    raise FileNotFoundError(f"No initial_program found in {base}")
+
+
+def find_best_program(fw_dir: Path) -> Path | None:
+    """Find the best program file (.go or .py) in a framework's best/ dir."""
+    best_dir = fw_dir / "best"
+    if not best_dir.is_dir():
+        return None
+    for suffix in (".go", ".py"):
+        path = best_dir / f"best_program{suffix}"
+        if path.exists():
+            return path
+    return None
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python analyze_diffs.py <results_dir>")
@@ -93,16 +126,16 @@ def main():
         print(f"Directory not found: {results_dir}")
         sys.exit(1)
 
-    initial_program = Path(__file__).parent.parent / "initial_program.py"
+    initial_program = find_initial_program()
     initial_code = extract_go_code(initial_program)
     if not initial_code:
-        print(f"Could not extract GO_ROUTING_CODE from {initial_program}")
+        print(f"Could not extract Go code from {initial_program}")
         sys.exit(1)
 
     frameworks = sorted(
         p.name
         for p in results_dir.iterdir()
-        if p.is_dir() and (p / "best" / "best_program.py").exists()
+        if p.is_dir() and find_best_program(p) is not None
     )
 
     if not frameworks:
@@ -111,10 +144,10 @@ def main():
 
     diffs: dict[str, str] = {}
     for fw in frameworks:
-        best_program = results_dir / fw / "best" / "best_program.py"
+        best_program = find_best_program(results_dir / fw)
         best_code = extract_go_code(best_program)
         if not best_code:
-            print(f"  {fw}: Could not extract GO_ROUTING_CODE, skipping")
+            print(f"  {fw}: Could not extract Go code, skipping")
             continue
 
         diff = generate_diff(initial_code, best_code, fw)

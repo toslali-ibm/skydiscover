@@ -30,15 +30,28 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.parent  # benchmarks/blis_router/
 EVALUATOR_PATH = SCRIPT_DIR / "evaluator.py"
-INITIAL_PROGRAM = SCRIPT_DIR / "initial_program.py"
+INITIAL_PROGRAM = (
+    SCRIPT_DIR / "initial_program.go"
+    if (SCRIPT_DIR / "initial_program.go").exists()
+    else SCRIPT_DIR / "initial_program.py"
+)
 WORKLOADS = ["cache_warmup", "load_spikes", "multiturn"]
 
 
+def _find_best_program(fw_dir: Path) -> Path | None:
+    """Find best program file (.go or .py) in a framework's best/ dir."""
+    for suffix in (".go", ".py"):
+        path = fw_dir / "best" / f"best_program{suffix}"
+        if path.exists():
+            return path
+    return None
+
+
 def find_frameworks(results_dir: Path) -> list[str]:
-    """Find frameworks that have a best/best_program.py."""
+    """Find frameworks that have a best program (.go or .py)."""
     frameworks = []
     for p in sorted(results_dir.iterdir()):
-        if p.is_dir() and (p / "best" / "best_program.py").exists():
+        if p.is_dir() and _find_best_program(p) is not None:
             frameworks.append(p.name)
     return frameworks
 
@@ -128,7 +141,7 @@ def run_validation(
         # Evaluate each framework for each seed
         for fw in frameworks:
             mode_results["frameworks"][fw] = {}
-            program_path = results_dir / fw / "best" / "best_program.py"
+            program_path = _find_best_program(results_dir / fw)
             for seed in seeds:
                 eval_count += 1
                 elapsed = time.time() - start_time
