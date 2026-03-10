@@ -15,7 +15,9 @@ SkyDiscover is a modular framework for AI-driven scientific and algorithmic disc
 | Understand or modify configuration               | [docs/codebase-notes/configuration.md](docs/codebase-notes/configuration.md) |
 | Add a new algorithm, benchmark, or component     | [docs/codebase-notes/extending.md](docs/codebase-notes/extending.md) |
 | Run BLIS router experiments                       | [docs/experiments/blis-router.md](docs/experiments/blis-router.md) |
+| Run Vidur router experiments                      | [docs/experiments/vidur-router.md](docs/experiments/vidur-router.md) |
 | BLIS router experiment design & execution plan    | [docs/plans/design-blis-experiments.md](docs/plans/design-blis-experiments.md) |
+| Vidur router benchmark design & execution plan    | [docs/plans/design-vidur-router-benchmark.md](docs/plans/design-vidur-router-benchmark.md) |
 
 ## Key Commands
 
@@ -88,6 +90,44 @@ ls benchmarks/blis_router/baseline_metrics.json 2>/dev/null         # must not e
 - ShinkaEvolve (`-s shinkaevolve`) is **currently blocked** — it requires an embedding model (`text-embedding-3-small`) for code deduplication, and the IBM LiteLLM proxy does not serve embedding models. Do NOT attempt to run ShinkaEvolve until this is resolved. See [ShinkaEvolve Setup](docs/experiments/blis-router.md#shinkaevolve-setup) for details and unblocking options. Also requires `max_parallel_jobs: 1` for BLIS router.
 - Experiments take ~60s per iteration by default (LLM call + Go build + 12 simulations: 2 seeds × 2 LLMs × 3 workloads). With single-LLM (`BLIS_MULTI_LLM=0`), ~40s. With single seed + single LLM, ~30s
 
+## Quick-Start: Run a Vidur Router Experiment
+
+When asked to run a Vidur router experiment, use this recipe. **Do NOT use the `-m` flag** — the config.yaml already specifies models.
+
+```bash
+# 1. Ensure deps and traces
+uv sync
+python benchmarks/vidur_router/scripts/generate_traces.py  # one-time
+
+# 2. Pre-flight checks
+ls benchmarks/vidur_router/workloads/*.csv                  # traces exist
+ls benchmarks/vidur_router/baseline_metrics.json 2>/dev/null # must not exist
+
+# 3. Name the experiment
+EXPERIMENT="$(date +%y%m%d)_<N>i_<TAG>"
+
+# 4. Run a single framework
+export VIDUR_OUTPUT_DIR="outputs/vidur_router/${EXPERIMENT}/<FRAMEWORK>"
+export VIDUR_SEED="42"  # or "42,456" for multi-seed
+# export VIDUR_MULTI_LLM="0"  # default is "1" (both Llama-2-7B + Llama-3-8B)
+mkdir -p "$VIDUR_OUTPUT_DIR"
+uv run skydiscover-run \
+  benchmarks/vidur_router/initial_program.py \
+  benchmarks/vidur_router/evaluator.py \
+  -c benchmarks/vidur_router/config.yaml \
+  -s <FRAMEWORK> \
+  -i <ITERATIONS> \
+  -o "$VIDUR_OUTPUT_DIR" \
+  -l INFO
+
+# 5. Post-run: no leaked artifacts
+ls benchmarks/vidur_router/baseline_metrics.json 2>/dev/null  # must not exist
+```
+
+**Available frameworks**: same as BLIS (`adaevolve`, `evox`, `openevolve`, `gepa_native`, `topk`, `best_of_n`, `beam_search`)
+
+**Timing**: Vidur is Python DES — expect longer per-iteration times than BLIS. Use `VIDUR_TRACE_SCALE=0.25` for faster search.
+
 ## Project Structure (top-level)
 
 ```
@@ -104,6 +144,7 @@ skydiscover/          # Main package
   extras/             # Monitor dashboard, external backends
 benchmarks/           # ~200 optimization tasks
   blis_router/        # BLIS router optimization benchmark (see below)
+  vidur_router/       # Vidur router optimization benchmark (generality experiment)
 configs/              # YAML config templates
 scripts/reproduce/    # Reproduction scripts for paper results
 tests/                # Pytest tests

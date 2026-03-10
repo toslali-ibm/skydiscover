@@ -1,0 +1,74 @@
+language: python
+file_suffix: .py
+diff_based_generation: true
+max_iterations: 50
+checkpoint_interval: 5
+max_solution_length: 20000
+
+llm:
+  models:
+    - name: "aws/claude-sonnet-4-5"
+      weight: 0.7
+    - name: "aws/claude-opus-4-6"
+      weight: 0.3
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  temperature: 1.0
+  max_tokens: 16000
+  timeout: 120
+
+prompt:
+  system_message: |
+    You are optimizing a request routing algorithm for an LLM inference cluster
+    simulated by Vidur (discrete-event simulator). The cluster has 4 replicas,
+    each running the same LLM model on A100 GPUs.
+
+    GOAL: Minimize end-to-end request latency and tail latency.
+    Score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms (higher/less negative = better)
+
+    AVAILABLE SIGNALS PER REQUEST (properties on request objects):
+    - arrived_at (float): arrival timestamp in seconds
+    - num_prefill_tokens (int): input tokens (larger = longer first-token time)
+    - num_decode_tokens (int): output tokens to generate
+    - total_tokens (int): prefill + decode
+    - pd_ratio (float): prefill / decode ratio (high = compute-heavy prefill)
+
+    AVAILABLE SIGNALS PER REPLICA (via replica_schedulers dict values):
+    - replica_id (int): unique replica identifier
+    - num_pending_requests (int): queue depth (requests waiting + in-progress)
+    - memory_usage_percent (int): 0-100% KV-cache memory utilization
+    - is_empty() (bool): no pending work
+
+    KNOWN WEAKNESS OF BASELINE (LOR):
+    LOR only considers queue depth. It ignores request size — routing a 4096-token
+    prefill to a replica with 1 pending request is suboptimal if another replica
+    with 2 small pending requests would finish sooner. It also ignores memory
+    pressure — a replica at 90% memory may preempt requests, increasing latency.
+
+    SIGNAL FRESHNESS:
+    All signals are real-time (simulation state). In production, queue depth and
+    memory would have ~5s staleness from Prometheus scraping. Algorithms that
+    are robust to stale signals are preferred.
+
+    NOTE ON MEMORY SIGNALS:
+    Memory signals (memory_usage_percent) start at 0 for all replicas and only
+    become informative after requests have been processed. Early scheduling rounds
+    should rely on queue depth (num_pending_requests).
+
+    RULES:
+    - Only modify code between EVOLVE-BLOCK-START and EVOLVE-BLOCK-END
+    - Must be valid Python — no syntax errors
+    - Must return List[Tuple[int, Request]] — (replica_id, request) pairs
+    - replica_id values MUST come from replica_schedulers.keys()
+    - Must consume all requests from request_queue
+    - Only import typing and math (no external packages)
+    - Guard all divisions against zero
+
+search:
+  type: "adaevolve"
+  num_context_programs: 4
+  database:
+    random_seed: 42
+
+evaluator:
+  timeout: 900
+  cascade_evaluation: false
