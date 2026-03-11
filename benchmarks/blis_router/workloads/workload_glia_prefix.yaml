@@ -1,0 +1,178 @@
+# Glia-style workload with prefix locality stress test
+#
+# Based on Glia paper (Hamadanian et al., arXiv:2510.27176, Section 5):
+#   - ShareGPT-like token distributions (prompt mean ~400-500, output mean ~200-250)
+#   - 7.5 QPS with bursty arrivals (log-normal σ=2 ≈ gamma CV=7.3)
+#   - Heavy-tailed: 5% of prompts inflated 10x, 5% of decodes inflated 10x
+#
+# Prefix-heavy adaptation for BLIS (4 instances):
+#   - 4 prefix groups with large shared system prompts (1024-4096 tokens)
+#   - Prefix tokens >> per-request input tokens → cache hits dominate latency
+#   - Routing to wrong instance = full prefix recomputation (expensive)
+#   - Routing to right instance = near-free cache hit
+#
+# 1000 requests at 7.5 req/s (~133 seconds simulated).
+
+version: "1"
+seed: 42
+category: language
+aggregate_rate: 7.5
+num_requests: 1000
+
+clients:
+  # --- Prefix group 1: Coding assistant (largest system prompt) ---
+  - id: "coding"
+    slo_class: "interactive"
+    rate_fraction: 0.30
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 7.3
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 500
+        std_dev: 300
+        min: 10
+        max: 2000
+    output_distribution:
+      type: exponential
+      params:
+        mean: 250
+    prefix_group: "coding-system"
+    prefix_length: 4096
+
+  # --- Prefix group 2: Chat assistant ---
+  - id: "chat"
+    slo_class: "interactive"
+    rate_fraction: 0.25
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 7.3
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 400
+        std_dev: 250
+        min: 10
+        max: 1500
+    output_distribution:
+      type: exponential
+      params:
+        mean: 200
+    prefix_group: "chat-system"
+    prefix_length: 2048
+
+  # --- Prefix group 3: RAG / knowledge retrieval ---
+  - id: "rag-qa"
+    slo_class: "interactive"
+    rate_fraction: 0.20
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 7.3
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 350
+        std_dev: 200
+        min: 10
+        max: 1200
+    output_distribution:
+      type: exponential
+      params:
+        mean: 150
+    prefix_group: "rag-context"
+    prefix_length: 3072
+
+  # --- Prefix group 4: API / tool-use (shorter prefix) ---
+  - id: "api-tools"
+    slo_class: "interactive"
+    rate_fraction: 0.10
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 7.3
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 200
+        std_dev: 100
+        min: 10
+        max: 800
+    output_distribution:
+      type: exponential
+      params:
+        mean: 100
+    prefix_group: "api-schema"
+    prefix_length: 1024
+
+  # --- Heavy tail: 5% inflated prompts (10x mean, per Glia paper) ---
+  # Shares prefix group with coding (largest prefix → most cache impact)
+  - id: "heavy-prompt"
+    slo_class: "interactive"
+    rate_fraction: 0.05
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 7.3
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 5000
+        std_dev: 2000
+        min: 1000
+        max: 15000
+    output_distribution:
+      type: exponential
+      params:
+        mean: 250
+    prefix_group: "coding-system"
+    prefix_length: 4096
+
+  # --- Heavy tail: 5% inflated decodes (10x mean, per Glia paper) ---
+  # Shares prefix group with chat
+  - id: "heavy-decode"
+    slo_class: "interactive"
+    rate_fraction: 0.05
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 7.3
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 400
+        std_dev: 250
+        min: 10
+        max: 1500
+    output_distribution:
+      type: exponential
+      params:
+        mean: 2500
+    prefix_group: "chat-system"
+    prefix_length: 2048
+
+  # --- Heavy tail: 5% inflated BOTH (extreme outliers) ---
+  # Shares prefix group with RAG
+  - id: "heavy-both"
+    slo_class: "batch"
+    rate_fraction: 0.05
+    streaming: false
+    arrival:
+      process: gamma
+      cv: 7.3
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 4000
+        std_dev: 1500
+        min: 500
+        max: 12000
+    output_distribution:
+      type: exponential
+      params:
+        mean: 2000
+    prefix_group: "rag-context"
+    prefix_length: 3072

@@ -1,0 +1,108 @@
+# Prefix-heavy workload: very large shared prefixes, tiny per-request input/output
+#
+# Designed to strongly reward prefix-aware routing:
+#   - 4 prefix groups with massive system prompts (8192-16384 tokens)
+#   - Per-request input is tiny (50-150 mean) → prefix dominates total input
+#   - Output tokens very small (20-50 mean) → prefill cost >> decode cost
+#   - High QPS (60) with 4 instances → saturated, every cache miss hurts
+#   - Cache hit = skip 8K-16K token prefill → huge latency win
+#   - Cache miss = full recomputation → very expensive
+#   - 4 prefix groups × 4 instances → ideal assignment is 1 group per instance
+#   - Equal rate fractions across groups → balanced if routed correctly
+#
+# 1000 requests at 60 req/s (~17 seconds simulated).
+
+version: "1"
+seed: 42
+category: language
+aggregate_rate: 120.0
+num_requests: 1500
+
+clients:
+  # --- Prefix group 1: Coding assistant (massive system prompt) ---
+  - id: "coding"
+    slo_class: "interactive"
+    rate_fraction: 0.25
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 4.0
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 100
+        std_dev: 50
+        min: 10
+        max: 300
+    output_distribution:
+      type: exponential
+      params:
+        mean: 5
+    prefix_group: "coding-system"
+    prefix_length: 16384
+
+  # --- Prefix group 2: Chat assistant ---
+  - id: "chat"
+    slo_class: "interactive"
+    rate_fraction: 0.25
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 4.0
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 80
+        std_dev: 40
+        min: 10
+        max: 250
+    output_distribution:
+      type: exponential
+      params:
+        mean: 3
+    prefix_group: "chat-system"
+    prefix_length: 12288
+
+  # --- Prefix group 3: RAG / knowledge retrieval ---
+  - id: "rag-qa"
+    slo_class: "interactive"
+    rate_fraction: 0.25
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 4.0
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 120
+        std_dev: 60
+        min: 10
+        max: 350
+    output_distribution:
+      type: exponential
+      params:
+        mean: 4
+    prefix_group: "rag-context"
+    prefix_length: 10240
+
+  # --- Prefix group 4: API / tool-use ---
+  - id: "api-tools"
+    slo_class: "interactive"
+    rate_fraction: 0.25
+    streaming: true
+    arrival:
+      process: gamma
+      cv: 4.0
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 60
+        std_dev: 30
+        min: 10
+        max: 200
+    output_distribution:
+      type: exponential
+      params:
+        mean: 2
+    prefix_group: "api-schema"
+    prefix_length: 8192
