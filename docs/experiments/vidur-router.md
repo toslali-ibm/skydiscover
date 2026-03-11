@@ -17,12 +17,12 @@ This guide covers how to run Vidur router optimization experiments using SkyDisc
 ## Naming Convention
 
 ```
-outputs/vidur_router/<YYMMDD>_<iters>i_<tag>/
+outputs/vidur_router/<YYMMDD>_<iters>i_<tag>_vidur/
 ```
 
-Same convention as BLIS. Examples:
-- `260310_50i_seed42` — 50 iterations, seed 42
-- `260312_100i_multi_llm` — 100 iterations, multi-LLM
+All Vidur experiment names MUST end with `_vidur` suffix to distinguish from BLIS experiments. Examples:
+- `260310_50i_seed42_vidur` — 50 iterations, seed 42
+- `260312_100i_multi_llm_vidur` — 100 iterations, multi-LLM
 
 ## Running Experiments
 

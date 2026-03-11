@@ -103,8 +103,8 @@ python benchmarks/vidur_router/scripts/generate_traces.py  # one-time
 ls benchmarks/vidur_router/workloads/*.csv                  # traces exist
 ls benchmarks/vidur_router/baseline_metrics.json 2>/dev/null # must not exist
 
-# 3. Name the experiment
-EXPERIMENT="$(date +%y%m%d)_<N>i_<TAG>"
+# 3. Name the experiment (MUST end with _vidur suffix)
+EXPERIMENT="$(date +%y%m%d)_<N>i_<TAG>_vidur"
 
 # 4. Run a single framework
 export VIDUR_OUTPUT_DIR="outputs/vidur_router/${EXPERIMENT}/<FRAMEWORK>"
