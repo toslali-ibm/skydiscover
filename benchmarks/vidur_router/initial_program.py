@@ -51,7 +51,6 @@ RULES:
 from typing import List, Tuple, Dict, Any
 
 
-# EVOLVE-BLOCK-START
 def schedule(request_queue: list, replica_schedulers: dict, num_replicas: int) -> List[Tuple[int, Any]]:
     """Route queued requests to replicas using Least Outstanding Requests (LOR).
 
@@ -63,6 +62,7 @@ def schedule(request_queue: list, replica_schedulers: dict, num_replicas: int) -
     Returns:
         List of (replica_id, request) tuples assigning each request to a replica.
     """
+    # EVOLVE-BLOCK-START
     request_queue.sort(key=lambda r: r.arrived_at)
     request_mapping = []
     pending_requests_map = {
@@ -74,5 +74,5 @@ def schedule(request_queue: list, replica_schedulers: dict, num_replicas: int) -
         replica_id = min(pending_requests_map.items(), key=lambda x: x[1])[0]
         pending_requests_map[replica_id] += 1
         request_mapping.append((replica_id, request))
+    # EVOLVE-BLOCK-END
     return request_mapping
-# EVOLVE-BLOCK-END
