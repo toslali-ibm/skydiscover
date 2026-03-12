@@ -60,14 +60,12 @@ NUM_REPLICAS = int(os.environ.get("VIDUR_NUM_REPLICAS", "4"))
 TRACE_SCALE = float(os.environ.get("VIDUR_TRACE_SCALE", "1.0"))
 
 WORKLOADS = [
-    "cache_warmup",
-    "load_spikes",
     "multiturn",
 ]
 
 # Model configs: (display_name, model_name_for_vidur, device, tp_size)
-_MODEL_LLAMA2_7B = ("llama2_7b", "meta-llama/Llama-2-7b-hf", "a100", 1)
-_MODEL_LLAMA3_8B = ("llama3_8b", "meta-llama/Meta-Llama-3-8B", "a100", 1)
+_MODEL_LLAMA2_7B = ("llama2_7b", "meta-llama/Llama-2-7b-hf", "h100", 1)
+_MODEL_LLAMA3_8B = ("llama3_8b", "meta-llama/Meta-Llama-3-8B", "h100", 1)
 
 
 def _get_models() -> list:

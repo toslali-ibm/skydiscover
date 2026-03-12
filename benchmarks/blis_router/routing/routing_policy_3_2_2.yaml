@@ -1,0 +1,14 @@
+admission:
+  policy: always-admit
+priority:
+  policy: constant
+routing:
+  policy: weighted
+  scorers:
+  - name: prefix-affinity
+    weight: 3.0
+  - name: queue-depth
+    weight: 2.0
+  - name: kv-utilization
+    weight: 2.0
+scheduler: fcfs

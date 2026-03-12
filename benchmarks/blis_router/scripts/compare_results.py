@@ -12,7 +12,25 @@ import json
 import sys
 from pathlib import Path
 
-WORKLOADS = ["cache_warmup", "load_spikes", "multiturn"]
+DEFAULT_WORKLOADS = ["cache_warmup", "load_spikes", "multiturn"]
+GLIA_WORKLOADS = ["glia_40qps", "prefix_heavy"]
+WORKLOADS = DEFAULT_WORKLOADS  # overridden by detect_workloads() in main()
+
+
+def detect_workloads(results_dir: Path, frameworks: list[str]) -> list[str]:
+    """Auto-detect workload names from best_program_info.json metrics keys."""
+    for fw in frameworks:
+        best_info = results_dir / fw / "best" / "best_program_info.json"
+        if best_info.exists():
+            with open(best_info) as f:
+                data = json.load(f)
+            metrics = data.get("metrics", data)
+            # Check for glia workload keys
+            if any(k.startswith("glia_40qps") for k in metrics):
+                return GLIA_WORKLOADS
+            if any(k.startswith("cache_warmup") for k in metrics):
+                return DEFAULT_WORKLOADS
+    return DEFAULT_WORKLOADS
 
 
 def load_best_result(framework_dir: Path) -> dict | None:
@@ -90,6 +108,8 @@ def main():
         print("No framework results found.")
         sys.exit(1)
 
+    global WORKLOADS
+    WORKLOADS = detect_workloads(results_dir, frameworks)
     baseline = load_baseline(results_dir, frameworks)
 
     # --- Table 1: Aggregate scores ---

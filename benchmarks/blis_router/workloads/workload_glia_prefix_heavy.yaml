@@ -39,7 +39,7 @@ clients:
       params:
         mean: 5
     prefix_group: "coding-system"
-    prefix_length: 16384
+    prefix_length: 6144
 
   # --- Prefix group 2: Chat assistant ---
   - id: "chat"
@@ -61,7 +61,7 @@ clients:
       params:
         mean: 3
     prefix_group: "chat-system"
-    prefix_length: 12288
+    prefix_length: 6144
 
   # --- Prefix group 3: RAG / knowledge retrieval ---
   - id: "rag-qa"
@@ -83,7 +83,7 @@ clients:
       params:
         mean: 4
     prefix_group: "rag-context"
-    prefix_length: 10240
+    prefix_length: 6144
 
   # --- Prefix group 4: API / tool-use ---
   - id: "api-tools"
@@ -105,4 +105,4 @@ clients:
       params:
         mean: 2
     prefix_group: "api-schema"
-    prefix_length: 8192
+    prefix_length: 6144

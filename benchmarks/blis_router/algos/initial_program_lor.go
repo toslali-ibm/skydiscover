@@ -175,47 +175,33 @@ func (ws *WeightedScoring) Route(req *Request, state *RouterState) RoutingDecisi
 	}
 
 	// EVOLVE-BLOCK-START
-	// Compute composite scores from all scorers
+	// LOR (Least Outstanding Requests): Route to instance with fewest in-flight requests.
+	// Available signals per instance (snap):
+	//   FRESH (updated every routing call):
+	//     snap.InFlightRequests  - requests dispatched but not completed
+	//     snap.CacheHitRate      - prefix cache hit rate (0.0-1.0)
+	//   STALE (up to 5s old, from Prometheus-like scrape):
+	//     snap.QueueDepth        - requests waiting in instance queue
+	//     snap.BatchSize         - requests currently being processed
+	//     snap.KVUtilization     - KV cache memory pressure (0.0-1.0)
+	//     snap.FreeKVBlocks      - available KV cache memory blocks
+	//   DERIVED:
+	//     snap.EffectiveLoad()   - QueueDepth + BatchSize + InFlightRequests
+	// Available request signals (req):
+	//     req.SLOClass           - "realtime", "interactive", or "batch"
+	//     req.SessionID          - non-empty for multi-turn sessions
+	//     len(req.InputTokens)   - input size (token count)
 	scores := make(map[string]float64, len(snapshots))
-	for i, scorer := range ws.scorers {
-		dimScores := scorer(req, snapshots)
-		for _, snap := range snapshots {
-			s := dimScores[snap.ID]
-			// Clamp to [0,1] per scorer contract
-			if s < 0 {
-				s = 0
-			}
-			if s > 1 {
-				s = 1
-			}
-			scores[snap.ID] += s * ws.weights[i]
-		}
-	}
-
-	// Argmax: select instance with highest composite score.
-	// Pass 1: find maximum score.
-	bestScore := -1.0
-	for _, snap := range snapshots {
-		if scores[snap.ID] > bestScore {
-			bestScore = scores[snap.ID]
-		}
-	}
-
-	// Pass 2: collect all instances tied at maximum score.
-	// Exact float equality is correct here because identical instance states produce
-	// bitwise-identical scores (same accumulation order on same data per IEEE 754).
-	var tied []int
+	bestIdx := 0
+	minInflight := snapshots[0].InFlightRequests
 	for i, snap := range snapshots {
-		if scores[snap.ID] == bestScore {
-			tied = append(tied, i)
+		scores[snap.ID] = 1.0 / (1.0 + float64(snap.InFlightRequests))
+		if snap.InFlightRequests < minInflight {
+			minInflight = snap.InFlightRequests
+			bestIdx = i
 		}
 	}
-
-	// Random tie-breaking when rng is non-nil; positional (first) when nil.
-	bestIdx := tied[0]
-	if len(tied) > 1 && ws.rng != nil {
-		bestIdx = tied[ws.rng.Intn(len(tied))]
-	}
+	bestScore := scores[snapshots[bestIdx].ID]
 	// EVOLVE-BLOCK-END
 
 	// Notify observers of routing decision (stateful scorers update their state).

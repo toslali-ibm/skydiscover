@@ -1,6 +1,6 @@
 language: python
 file_suffix: .py
-diff_based_generation: true
+diff_based_generation: false
 max_iterations: 50
 checkpoint_interval: 5
 max_solution_length: 40000
@@ -24,16 +24,17 @@ prompt:
     GOAL: Minimize end-to-end latency by improving how requests are routed to replicas.
 
     BASELINE: Least Outstanding Requests (LOR) — routes to the replica with fewest
-    pending requests. Ignores request size and memory pressure.
-    KNOWN WEAKNESS: A 4096-token prefill routed to a replica with 1 pending request
-    is suboptimal if another replica with 2 small pending requests would finish sooner.
-    Improving work-awareness is a key opportunity.
+    pending requests.
 
     AVAILABLE SIGNALS — from request (properties on request objects):
       - num_prefill_tokens (int): input tokens (prefill costs ~3x more compute than decode)
-      - num_decode_tokens (int): output tokens to generate
-      - total_tokens (int): prefill + decode
-      - pd_ratio (float): prefill/decode ratio (high = compute-heavy)
+      - arrived_at (float): arrival timestamp in seconds
+
+    FORBIDDEN SIGNALS — DO NOT USE (not available at routing time in production):
+      - num_decode_tokens: output length is unknown before generation starts
+      - total_tokens: depends on num_decode_tokens
+      - pd_ratio: depends on num_decode_tokens
+    Any code using these fields will be considered invalid.
 
     AVAILABLE SIGNALS — from replica (via replica_schedulers dict values):
       - replica_id (int): unique replica identifier

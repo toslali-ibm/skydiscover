@@ -1,0 +1,94 @@
+# Cache Warmup & Exploitation — V3 (Vidur-rate)
+#
+# Same scenario as v2 but with Vidur-calibrated rate and request count.
+# Tests whether routing strategies discovered at high load (v2: 200 QPS)
+# still hold at low load (v3: ~17 QPS).
+#
+# 500 requests at ~16.7 req/s (~30 seconds simulated).
+# Request mix unchanged from v2.
+
+version: "1"
+seed: 42
+category: language
+aggregate_rate: 16.7
+num_requests: 500
+
+clients:
+  - id: "prefix-group-a"
+    slo_class: "interactive"
+    rate_fraction: 0.30
+    streaming: false
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 300
+        std_dev: 80
+        min: 100
+        max: 600
+    output_distribution:
+      type: exponential
+      params:
+        mean: 64
+    prefix_group: "system-prompt-chatbot"
+    prefix_length: 512
+
+  - id: "prefix-group-b"
+    slo_class: "interactive"
+    rate_fraction: 0.30
+    streaming: false
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 400
+        std_dev: 100
+        min: 150
+        max: 800
+    output_distribution:
+      type: exponential
+      params:
+        mean: 80
+    prefix_group: "system-prompt-code"
+    prefix_length: 384
+
+  - id: "prefix-group-c"
+    slo_class: "realtime"
+    rate_fraction: 0.25
+    streaming: true
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 100
+        std_dev: 30
+        min: 40
+        max: 250
+    output_distribution:
+      type: exponential
+      params:
+        mean: 40
+    prefix_group: "api-gateway-prompt"
+    prefix_length: 128
+
+  - id: "unique-requests"
+    slo_class: "batch"
+    rate_fraction: 0.15
+    streaming: false
+    arrival:
+      process: gamma
+      cv: 3.0
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 600
+        std_dev: 200
+        min: 200
+        max: 1200
+    output_distribution:
+      type: exponential
+      params:
+        mean: 150

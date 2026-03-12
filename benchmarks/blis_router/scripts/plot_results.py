@@ -25,7 +25,9 @@ except ImportError:
     print("matplotlib is required: pip install matplotlib")
     sys.exit(1)
 
-WORKLOADS = ["cache_warmup", "load_spikes", "multiturn"]
+DEFAULT_WORKLOADS = ["cache_warmup", "load_spikes", "multiturn"]
+GLIA_WORKLOADS = ["glia_40qps", "prefix_heavy"]
+WORKLOADS = DEFAULT_WORKLOADS  # overridden by detect_workloads() in main()
 BASELINE_COLOR = "#999999"
 FRAMEWORK_COLORS = {
     "adaevolve": "#4C72B0",
@@ -34,6 +36,23 @@ FRAMEWORK_COLORS = {
     "evox": "#C44E52",
 }
 DEFAULT_COLOR = "#8172B2"
+
+
+def detect_workloads(results_dir: Path) -> list[str]:
+    """Auto-detect workloads from best_program_info.json files."""
+    for fw_dir in sorted(results_dir.iterdir()):
+        if not fw_dir.is_dir():
+            continue
+        best_info = fw_dir / "best" / "best_program_info.json"
+        if best_info.exists():
+            with open(best_info) as f:
+                data = json.load(f)
+            metrics = data.get("metrics", data)
+            if any(k.startswith("glia_40qps") for k in metrics):
+                return GLIA_WORKLOADS
+            if any(k.startswith("cache_warmup") for k in metrics):
+                return DEFAULT_WORKLOADS
+    return DEFAULT_WORKLOADS
 
 
 def _fw_color(name: str) -> str:
@@ -92,43 +111,41 @@ def load_baseline(results_dir: Path) -> dict | None:
 
 
 def plot_combined_scores(rows: list[dict], baseline: dict | None, out_dir: Path):
-    """Bar chart of combined score per framework with baseline bar and % annotations.
+    """Bar chart of % improvement vs baseline per framework.
 
-    Plots -combined_score (negated) so bars grow upward (lower latency = taller bar).
+    The evaluator's combined_score for evolved programs is already a percentage
+    improvement (mean per-workload improvement × 100). The baseline's combined_score
+    is in different units (raw -0.5*e2e - 0.5*p95). So we plot the baseline as 0%
+    and each framework as its combined_score (which IS the % improvement).
     """
-    baseline_score = baseline["combined_score"] if baseline else None
-
-    # Build data: baseline first, then frameworks
+    # Build data: baseline at 0%, then frameworks by their % improvement score
     names = []
-    scores = []  # raw (negative) scores
+    pct_improvements = []
     colors = []
-    if baseline_score is not None:
+    if baseline is not None:
         names.append("baseline")
-        scores.append(baseline_score)
+        pct_improvements.append(0.0)
         colors.append(BASELINE_COLOR)
-    for r in rows:
+    for r in sorted(rows, key=lambda x: x["combined_score"], reverse=True):
         names.append(r["framework"])
-        scores.append(r["combined_score"])
+        pct_improvements.append(r["combined_score"])  # already a percentage
         colors.append(_fw_color(r["framework"]))
 
-    # Negate so bars point upward (higher bar = better)
-    display_vals = [-s for s in scores]
-
     fig, ax = plt.subplots(figsize=(max(7, len(names) * 1.4), 5.5))
-    bars = ax.bar(names, display_vals, color=colors, edgecolor="white", width=0.6)
+    bars = ax.bar(names, pct_improvements, color=colors, edgecolor="white", width=0.6)
 
-    # Annotate with score + % improvement
-    for bar, score, name in zip(bars, scores, names):
-        label = f"{score:.0f}"
-        if baseline_score is not None and name != "baseline":
-            pct = _pct_improvement_score(score, baseline_score)
-            sign = "+" if pct >= 0 else ""
-            label += f"\n({sign}{pct:.1f}%)"
+    # Annotate with score value
+    for bar, pct, name in zip(bars, pct_improvements, names):
+        if name == "baseline":
+            label = "0% (ref)"
+        else:
+            label = f"+{pct:.1f}%"
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                label, ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+                label, ha="center", va="bottom", fontsize=9, fontweight="bold")
 
-    ax.set_ylabel("-Combined Score = 0.5·avg_e2e + 0.5·avg_p95 (lower = better)")
-    ax.set_title("BLIS Router: Combined Score by Framework")
+    ax.set_ylabel("Improvement vs Baseline (%)")
+    ax.set_title("BLIS Router: Latency Improvement vs Baseline")
+    ax.axhline(y=0, color="black", linewidth=0.5)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
@@ -206,7 +223,8 @@ def plot_per_workload(rows: list[dict], baseline: dict | None, out_dir: Path):
     n = len(names)
     n_wl = len(WORKLOADS)
     width = 0.8 / n_wl
-    colors = ["#4C72B0", "#55A868", "#DD8452"]
+    all_colors = ["#4C72B0", "#55A868", "#DD8452"]
+    colors = all_colors[:n_wl]
 
     # Baseline values per workload
     baseline_wl = {}
@@ -256,6 +274,10 @@ def main():
     if not results_dir.is_dir():
         print(f"Directory not found: {results_dir}")
         sys.exit(1)
+
+    global WORKLOADS
+    WORKLOADS = detect_workloads(results_dir)
+    print(f"Detected workloads: {WORKLOADS}")
 
     rows = load_framework_data(results_dir)
     if not rows:

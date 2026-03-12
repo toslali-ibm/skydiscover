@@ -1,6 +1,6 @@
 language: go
 file_suffix: .go
-diff_based_generation: true
+diff_based_generation: false
 max_iterations: 50
 checkpoint_interval: 5
 max_solution_length: 40000
@@ -21,55 +21,81 @@ prompt:
   system_message: |
     You are optimizing a request router for a 4-instance LLM inference cluster.
 
-    GOAL: Minimize end-to-end latency by improving how requests are routed to instances.
+    GOAL: Minimize end-to-end latency across TWO very different workloads. The score
+    is the average percentage improvement over baseline (LLQ) across both workloads.
+    Each workload contributes equally. You need to be good at BOTH — not just one.
 
-    BASELINE: Fixed equal weights [1.0, 1.0] on two scorers (prefix-affinity, load-balance).
-    The weights never adapt to request or system state.
-    KNOWN WEAKNESS: The load-balance scorer uses 1/(1+load), which saturates at high load —
-    the signal difference between load 50 and 51 is <0.001, while prefix-affinity gives a
-    constant ~0.28 bonus. Under bursty traffic, this lets one instance accumulate all
-    prefix-heavy requests. Improving load-awareness is a key opportunity.
+    STARTING POINT: LLQ (Least-Loaded Queue) — routes to the instance with fewest
+    QueueDepth. This is a naive baseline that uses only stale signals. Your job is
+    to dramatically improve upon it (target: 50%+ improvement).
 
-    AVAILABLE SIGNALS — from request (req):
-      - len(req.InputTokens): input size
-      - req.SLOClass: "realtime", "interactive", or "batch"
-      - req.SessionID: non-empty for multi-turn sessions
+    A simple 1:1 prefix-affinity + load-balance router already beats LLQ by ~34%.
+    Your algorithm should beat that router by another 20%+ by being smarter about
+    when and how to combine these signals.
 
-    AVAILABLE SIGNALS — from instance snapshots (snap):
-      - scores[snap.ID]: weighted scorer output (after the scorer loop)
-      - snap.QueueDepth, snap.BatchSize, snap.InFlightRequests
-      - snap.EffectiveLoad(): QueueDepth + BatchSize + InFlightRequests
-      - snap.CacheHitRate: historical cache hit rate (0.0-1.0)
-      - snap.KVUtilization: memory pressure (0.0-1.0)
-      - snap.FreeKVBlocks: available memory blocks
+    === WORKLOAD 1: High-throughput general traffic (workload_glia_40qps.yaml) ===
+    - 40 QPS, 4 instances, bursty arrivals (gamma CV=7.3)
+    - ShareGPT-like tokens: ~500 input, ~250 output (large requests)
+    - NO prefix groups — all requests are unique, no cache reuse opportunity
+    - What matters: LOAD BALANCING. Spread requests evenly. Avoid pile-on.
+    - Key insight: QueueDepth is 5s stale → hundreds of requests arrive between
+      refreshes and all see the same QueueDepth. InFlightRequests is fresh and
+      prevents pile-on. KVUtilization helps avoid memory-pressured instances.
+    - LLQ gets ~6357ms E2E here. A good load-balancer gets ~4314ms (-32%).
 
-    SIGNAL FRESHNESS (snapshots refresh every 5 seconds, like a real Prometheus scrape):
-      - STALE (up to 5s old): QueueDepth, BatchSize, KVUtilization, FreeKVBlocks
-      - FRESH every routing call: InFlightRequests (tracked at cluster level, not scraped)
-      - FRESH every routing call: scores[snap.ID] (prefix-affinity scorer maintains its own
-        router-side cache index, updated after each decision — not scraped from instances)
-      - FRESH every routing call: snap.CacheHitRate (derived from prefix-affinity scorer state)
-      EffectiveLoad() = QueueDepth + BatchSize + InFlightRequests — partially stale.
-      At high request rates, hundreds of routing decisions happen between refreshes.
-      Stale signals look identical across instances even when actual state differs.
-      InFlightRequests and prefix-affinity scores are the only signals that differentiate
-      instances between refreshes.
+    === WORKLOAD 2: Prefix-heavy traffic (workload_glia_prefix_heavy.yaml) ===
+    - 120 QPS, 4 instances, moderate burstiness (gamma CV=4.0)
+    - Tiny per-request tokens: ~60-120 input, 2-5 output
+    - 4 prefix groups with MASSIVE shared prefixes (6144 tokens each)
+    - Prefix tokens are 50-100x larger than per-request input
+    - Cache hit = skip 6K token prefill (huge win). Cache miss = full recompute.
+    - What matters: PREFIX LOCALITY. Route same prefix group to same instance.
+    - Key insight: CacheHitRate tells you how well each instance caches your
+      prefix group. Route to high-CacheHitRate instances for prefix-heavy requests.
+    - LLQ gets ~87ms E2E here. A prefix-aware router gets ~57ms (-35%).
 
-    You can modify scores[snap.ID] after the scorer loop, add conditionals, or change
-    the selection logic.
+    === STRATEGY HINTS ===
+    The winning algorithm needs BOTH:
+    1. Load awareness (InFlightRequests, KVUtilization) for general traffic
+    2. Prefix locality (CacheHitRate) for prefix-heavy traffic
+
+    The challenge is combining them. Pure load-balance ignores cache. Pure prefix-
+    affinity creates hot spots. The best algorithms dynamically weight these signals.
+
+    Consider:
+    - Using CacheHitRate to boost score for instances that already cache the prefix
+    - Using InFlightRequests as the primary load signal (fresh, not stale)
+    - Using KVUtilization to avoid sending to memory-pressured instances
+    - Adaptive weighting: when CacheHitRate is high, favor cache; when it's low
+      everywhere, fall back to pure load-balance
+    - Input size awareness: large inputs benefit more from cache hits
+
+    AVAILABLE SIGNALS per instance (snap):
+      FRESH (updated every routing call):
+        - snap.InFlightRequests: requests dispatched but not yet completed
+        - snap.CacheHitRate: prefix cache hit rate 0.0-1.0
+      STALE (up to 5s old, Prometheus-like scrape):
+        - snap.QueueDepth: requests waiting in instance queue
+        - snap.BatchSize: requests currently being processed
+        - snap.KVUtilization: KV cache memory pressure 0.0-1.0
+        - snap.FreeKVBlocks: available KV cache memory blocks
+      DERIVED:
+        - snap.EffectiveLoad(): QueueDepth + BatchSize + InFlightRequests
+
+    AVAILABLE SIGNALS from request (req):
+        - len(req.InputTokens): input size (token count)
+        - req.SLOClass: "realtime", "interactive", or "batch"
+        - req.SessionID: non-empty for multi-turn sessions
 
     RULES (compilation failures waste an iteration):
     1. Only modify code between EVOLVE-BLOCK-START and EVOLVE-BLOCK-END
     2. Must be valid Go — guard all divisions to avoid NaN/Inf
     3. bestIdx must be valid: 0 <= bestIdx < len(snapshots)
-    4. Don't zero scores — use a small multiplier instead
-    5. Don't add new keys to scores[] — only modify existing instance IDs
+    4. scores[snap.ID] must be set for every instance (used for logging)
+    5. bestScore must be defined before EVOLVE-BLOCK-END
 
-    EVALUATION: Score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms (lower latency = higher score)
-    Tested on 3 workloads with different routing tensions:
-      - cache_warmup: 3 prefix groups across 4 instances, moderate rate. Prefix-affinity creates load imbalance.
-      - load_spikes: one prefix group gets 50% of bursty traffic. Cache affinity concentrates load.
-      - multiturn: multi-turn sessions with large prefixes. Bouncing sessions causes expensive cache misses.
+    EVALUATION: Score = mean percentage improvement over LLQ baseline, averaged
+    equally across both workloads. Baseline = 0%. Target: 50%+.
 
 search:
   type: "adaevolve"

@@ -1,0 +1,74 @@
+# Load Spikes — V3 (Vidur-rate)
+#
+# Same scenario as v2 but with Vidur-calibrated rate and request count.
+# Tests whether routing strategies discovered at high load (v2: 300 QPS)
+# still hold at low load (v3: ~17 QPS).
+#
+# 500 requests at ~16.7 req/s (~30 seconds simulated).
+# Request mix unchanged from v2.
+
+version: "1"
+seed: 42
+category: language
+aggregate_rate: 16.7
+num_requests: 500
+
+clients:
+  - id: "heavy-prefix-batch"
+    slo_class: "batch"
+    rate_fraction: 0.50
+    streaming: false
+    arrival:
+      process: gamma
+      cv: 3.0
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 400
+        std_dev: 120
+        min: 100
+        max: 800
+    output_distribution:
+      type: exponential
+      params:
+        mean: 120
+    prefix_group: "heavy-system-prompt"
+    prefix_length: 512
+
+  - id: "realtime-critical"
+    slo_class: "realtime"
+    rate_fraction: 0.25
+    streaming: true
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 80
+        std_dev: 20
+        min: 30
+        max: 180
+    output_distribution:
+      type: exponential
+      params:
+        mean: 30
+
+  - id: "light-prefix-interactive"
+    slo_class: "interactive"
+    rate_fraction: 0.25
+    streaming: false
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 200
+        std_dev: 50
+        min: 80
+        max: 400
+    output_distribution:
+      type: exponential
+      params:
+        mean: 60
+    prefix_group: "light-system-prompt"
+    prefix_length: 384

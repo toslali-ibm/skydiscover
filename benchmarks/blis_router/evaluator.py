@@ -6,9 +6,11 @@ Evaluates evolved routing algorithms by:
 2. Writing evolved routing.go to BLIS source (restored after evaluation)
 3. Building BLIS
 4. Running simulations on N seeds × N LLMs × 3 workloads (default: 2 seeds × 2 LLMs × 3 = 12 sims)
-5. Computing score based on average end-to-end latency across all seeds/models/workloads
+5. Computing score based on baseline-normalized per-workload ratios
 
-Score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms (higher = better)
+Score = mean(1 - candidate/baseline) × 100  (percentage improvement over baseline)
+Each workload contributes equally regardless of absolute latency magnitude.
+Higher is better; 0 = baseline parity, +20 = 20% faster, -10 = 10% slower.
 
 Multi-seed evaluation (default: seeds 42 and 456):
   Every candidate is tested against multiple simulation seeds to ensure
@@ -43,9 +45,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 WORKLOADS = [
-    ("cache_warmup", "workload_v2_cache_warmup.yaml"),
-    ("load_spikes", "workload_v2_load_spikes.yaml"),
-    ("multiturn", "workload_v2_multiturn.yaml"),
+    ("glia_40qps", "workload_glia_40qps.yaml"),
+    ("prefix_heavy", "workload_glia_prefix_heavy.yaml"),
 ]
 
 # Model configs: (short_name, model_id, extra CLI args)
@@ -355,6 +356,8 @@ def get_or_compute_baseline(
         for wl_name, wl_data in workload_results.items():
             if wl_data.get("e2e_ms") is not None:
                 baseline[f"{wl_name}_e2e_ms"] = wl_data["e2e_ms"]
+            if wl_data.get("e2e_p95_ms") is not None:
+                baseline[f"{wl_name}_p95_ms"] = wl_data["e2e_p95_ms"]
 
         if all_latencies:
             avg_e2e = sum(all_latencies) / len(all_latencies)
@@ -491,7 +494,33 @@ def evaluate(program_path: str) -> dict:
         avg_latency = sum(all_latencies) / len(all_latencies)
         avg_tail_latency = sum(all_tail_latencies) / len(all_tail_latencies)
 
-        score = -0.5 * avg_latency - 0.5 * avg_tail_latency
+        # Baseline-normalized scoring: each workload contributes equally
+        # regardless of absolute latency magnitude.
+        # Per-workload improvement = 1 - (candidate_latency / baseline_latency)
+        # Score = mean(improvements) × 100  (percentage points)
+        # Baseline = 0, positive = better than baseline, negative = worse.
+        # Example: 20% faster on both workloads → score = +20.0
+        improvements = []
+        for wl_name, _ in WORKLOADS:
+            wl_data = workload_results.get(wl_name, {})
+            wl_e2e = wl_data.get("e2e_ms")
+            wl_p95 = wl_data.get("e2e_p95_ms")
+            bl_e2e = baseline.get(f"{wl_name}_e2e_ms")
+            bl_p95 = baseline.get(f"{wl_name}_p95_ms")
+            if wl_e2e is not None and bl_e2e and bl_e2e > 0:
+                if wl_p95 is not None and bl_p95 and bl_p95 > 0:
+                    candidate_val = 0.5 * wl_e2e + 0.5 * wl_p95
+                    baseline_val = 0.5 * bl_e2e + 0.5 * bl_p95
+                else:
+                    candidate_val = wl_e2e
+                    baseline_val = bl_e2e
+                improvements.append(1.0 - candidate_val / baseline_val)
+
+        if improvements:
+            score = sum(improvements) / len(improvements) * 100.0
+        else:
+            # Fallback to raw scoring if baseline unavailable
+            score = -0.5 * avg_latency - 0.5 * avg_tail_latency
         total_runs = len(SIM_SEEDS) * len(models) * len(WORKLOADS)
         num_successful = len(all_latencies)
         success_rate = num_successful / total_runs
@@ -500,9 +529,8 @@ def evaluate(program_path: str) -> dict:
             "combined_score": score,
             "avg_e2e_ms": avg_latency,
             "avg_p95_ms": avg_tail_latency,
-            "cache_warmup_e2e_ms": workload_results.get("cache_warmup", {}).get("e2e_ms"),
-            "load_spikes_e2e_ms": workload_results.get("load_spikes", {}).get("e2e_ms"),
-            "multiturn_e2e_ms": workload_results.get("multiturn", {}).get("e2e_ms"),
+            **{f"{wk}_e2e_ms": workload_results.get(wk, {}).get("e2e_ms")
+               for wk, _ in WORKLOADS},
             "success_rate": success_rate,
             "num_successful": num_successful,
             "num_failed": len(failed_workloads),

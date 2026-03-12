@@ -1,0 +1,111 @@
+# Multi-Turn Session Affinity — V3 (prefix-heavy)
+#
+# Prefix-heavy variant: large system prompts with short outputs.
+# Routing to the wrong instance means re-processing thousands of prefix tokens.
+# Routing to the right instance gets a near-free cache hit.
+# This workload stresses whether the router can discover and exploit prefix locality.
+#
+# 1000 requests at 25 req/s (~40 seconds simulated).
+
+version: "1"
+seed: 42
+category: reasoning
+aggregate_rate: 25.0
+num_requests: 1000
+
+clients:
+  - id: "heavy-coding-sessions"
+    tenant_id: "developers"
+    slo_class: "interactive"
+    rate_fraction: 0.40
+    streaming: true
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 80
+        std_dev: 20
+        min: 30
+        max: 200
+    output_distribution:
+      type: exponential
+      params:
+        mean: 5
+    prefix_group: "coding-system-prompt"
+    prefix_length: 8192
+    reasoning:
+      multi_turn:
+        max_rounds: 5
+        think_time_us: 30000
+        context_growth: accumulate
+
+  - id: "chat-sessions"
+    tenant_id: "chat-users"
+    slo_class: "interactive"
+    rate_fraction: 0.25
+    streaming: true
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 60
+        std_dev: 15
+        min: 20
+        max: 150
+    output_distribution:
+      type: exponential
+      params:
+        mean: 5
+    prefix_group: "chat-system-prompt"
+    prefix_length: 4096
+    reasoning:
+      multi_turn:
+        max_rounds: 4
+        think_time_us: 50000
+        context_growth: accumulate
+
+  - id: "qa-sessions"
+    tenant_id: "qa-users"
+    slo_class: "interactive"
+    rate_fraction: 0.15
+    streaming: true
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 50
+        std_dev: 10
+        min: 20
+        max: 120
+    output_distribution:
+      type: exponential
+      params:
+        mean: 3
+    prefix_group: "qa-system-prompt"
+    prefix_length: 2048
+    reasoning:
+      multi_turn:
+        max_rounds: 3
+        think_time_us: 40000
+        context_growth: accumulate
+
+  - id: "realtime-api"
+    slo_class: "realtime"
+    rate_fraction: 0.20
+    streaming: true
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 40
+        std_dev: 10
+        min: 10
+        max: 100
+    output_distribution:
+      type: exponential
+      params:
+        mean: 3

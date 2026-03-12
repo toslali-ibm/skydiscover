@@ -19,20 +19,20 @@ import yaml
 BLIS_WORKLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "blis_router" / "workloads"
 
 WORKLOAD_FILES = [
-    ("cache_warmup", "workload_v2_cache_warmup.yaml"),
-    ("load_spikes", "workload_v2_load_spikes.yaml"),
-    ("multiturn", "workload_v2_multiturn.yaml"),
+    ("cache_warmup", "workload_v3_cache_warmup.yaml"),
+    ("load_spikes", "workload_v3_load_spikes.yaml"),
+    ("multiturn", "workload_v3_multiturn.yaml"),
 ]
 
 DEFAULT_SEEDS = [42, 456]
 
 # Calibrated parameters for Vidur's 4-replica Llama-2-7B-on-A100 cluster.
-# Derived from calibration study (calibrate_load_v3.py) targeting E2E 500-1500ms.
-# Original BLIS rates (185-276 QPS) overwhelm Vidur; these scale down to ~10-15 QPS.
+# V3 workloads already use Vidur-calibrated rates (~12-17 QPS), so rate_scale=1.0.
+# (V2 used high BLIS rates of 200-300 QPS and needed rate_scale=12-18x.)
 VIDUR_CALIBRATION = {
-    "cache_warmup": {"num_requests": 500, "rate_scale": 12.0},  # 200/12 ≈ 17 QPS
-    "load_spikes":  {"num_requests": 500, "rate_scale": 18.0},  # 300/18 ≈ 17 QPS
-    "multiturn":    {"num_requests": 400, "rate_scale": 12.0},  # 150/12 ≈ 12 QPS
+    "cache_warmup": {"num_requests": 500, "rate_scale": 1.0},  # 16.7 QPS as-is
+    "load_spikes":  {"num_requests": 500, "rate_scale": 1.0},  # 16.7 QPS as-is
+    "multiturn":    {"num_requests": 1000, "rate_scale": 1.0},  # 25 QPS, same as BLIS
 }
 
 # Max position embeddings for target models (Llama-2-7B, Llama-3-8B)

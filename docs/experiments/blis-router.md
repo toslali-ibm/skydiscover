@@ -196,7 +196,30 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 
 ### After Experiments (run ALL steps — even when adding one framework to an existing experiment)
 
-8. Run **all four** analysis scripts in order:
+8. **Run LOR baseline and comparison** — evaluates a pure load-balancing router (no prefix affinity) against the same workloads to establish a "dumb" baseline. This provides a 3-way comparison: LOR (load-balance only) → Baseline (prefix-affinity + load-balance) → Discovered (evolved algorithms).
+
+   ```bash
+   RESULTS_DIR="outputs/blis_router/<EXPERIMENT_DIR>"
+
+   # Run LOR baseline (~30s, uses same seeds/models as experiment)
+   python benchmarks/blis_router/scripts/run_lor_baseline.py \
+       --output-dir "$RESULTS_DIR/lor_baseline"
+
+   # Compare LOR vs baseline vs all discovered algorithms
+   python benchmarks/blis_router/scripts/compare_lor.py \
+       --lor "$RESULTS_DIR/lor_baseline/lor_metrics.json" \
+       --experiment "$RESULTS_DIR"
+   ```
+
+   This produces:
+   - `lor_baseline/lor_metrics.json` — LOR simulation results (same format as `baseline_metrics.json`)
+   - `lor_comparison.json` — 3-way comparison with value decomposition (how much improvement comes from prefix-affinity vs evolution)
+
+   **Why this matters**: The prefix-affinity baseline (1:1 weighted) can be worse than pure LOR on some workload mixes. The LOR comparison reveals whether discovered algorithms truly innovate beyond simple load-balancing, or just learned to undo harmful prefix-affinity. Check the per-workload breakdown — improvements concentrated on `multiturn` suggest session-aware routing is the real discovery.
+
+   The LOR script uses the same `try/finally` isolation pattern as the evaluator — `routing.go` is always restored. It respects `BLIS_SEED`, `BLIS_MULTI_LLM`, and `BLIS_NUM_INSTANCES` env vars.
+
+9. Run **all four** analysis scripts in order:
    ```bash
    RESULTS_DIR="outputs/blis_router/<YYYYMMDD_HHMMSS>"
    python benchmarks/blis_router/scripts/compare_results.py "$RESULTS_DIR"
@@ -219,21 +242,23 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
    - `diff_explanations.md` — diffs with LLM explanations
    - Per-framework `best/best_vs_initial.diff` files
 
-9. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
-10. **Write or update `analysis.md`** in the output directory.
+10. Record the exact experiment configuration (seed, iterations, model, inference-sim commit) in the output directory.
+11. **Write or update `analysis.md`** in the output directory.
 
     **DATA SOURCING RULE**: Every number in `analysis.md` MUST come from script output or JSON files — never compute or estimate numbers manually. Specifically:
     - Aggregate scores → `comparison_table.csv` or `compare_results.py` console output
     - Per-workload E2E and P95 → `comparison_table.csv` (includes baseline row and per-workload columns)
     - Effort metrics → `effort_analysis.json`
     - Per-model baseline → `compare_results.py` console output (Multi-LLM baseline breakdown section)
+    - LOR comparison → `lor_comparison.json` and `compare_lor.py` console output
     - If a number isn't in any script output, add it to the script first — do NOT fabricate it.
 
     The analysis MUST include ALL of:
     - Accuracy comparison table (scores, % improvement vs baseline) — **all frameworks including any newly added**
-    - Per-workload E2E latency table (baseline + all frameworks) — **copy from `compare_results.py` output**
-    - Per-workload P95 latency table (baseline + all frameworks) — **copy from `compare_results.py` output**
-    - Key findings
+    - **LOR comparison section**: 3-way table (LOR vs baseline vs discovered) with aggregate scores and per-workload breakdown. Include value decomposition showing how much improvement comes from prefix-affinity vs evolution. Source all numbers from `lor_comparison.json` and `compare_lor.py` output. Highlight whether discovered algorithms beat LOR or just undo harmful prefix-affinity.
+    - Per-workload E2E latency table (**LOR** + baseline + all frameworks) — include LOR column from `lor_comparison.json`
+    - Per-workload P95 latency table (**LOR** + baseline + all frameworks) — include LOR column from `lor_comparison.json`
+    - Key findings (including LOR vs discovered comparison — where do evolved algorithms actually beat pure load-balancing?)
     - Convergence comparison (20-iter vs 100-iter scores, if both exist)
     - Best iteration found per framework
     - Effort summary table (iterations, wall time, avg/median/min/max/stddev iteration time, population size, unique scores, diversity ratio, generation depth)
@@ -246,7 +271,7 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 
     **CRITICAL**: When adding a framework to an existing experiment, update ALL tables and findings in `analysis.md` — do not leave stale data from before the new framework was added.
 
-11. **Merge baseline metrics into best_program_info.json**: For each framework, copy the contents of `<framework>/baseline_metrics.json` into `<framework>/best/best_program_info.json` as a new top-level `"baseline_metrics"` key. This makes each best program self-contained with both its own metrics and the baseline it improved upon. Use a script like:
+12. **Merge baseline metrics into best_program_info.json**: For each framework, copy the contents of `<framework>/baseline_metrics.json` into `<framework>/best/best_program_info.json` as a new top-level `"baseline_metrics"` key. This makes each best program self-contained with both its own metrics and the baseline it improved upon. Use a script like:
     ```bash
     RESULTS_DIR="outputs/blis_router/<EXPERIMENT_DIR>"
     python3 -c "
@@ -263,7 +288,7 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
             print(f'  Updated {fw.name}/best/best_program_info.json')
     "
     ```
-12. **Robustness validation** (recommended before transferring algorithms): Re-evaluate best programs across multiple seeds to detect overfitting:
+13. **Robustness validation** (recommended before transferring algorithms): Re-evaluate best programs across multiple seeds to detect overfitting:
     ```bash
     python benchmarks/blis_router/scripts/validate_robustness.py "$RESULTS_DIR"
     # Runs both single-LLM and multi-LLM by default (3 seeds × 5 programs × 2 modes)
@@ -273,7 +298,7 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
     #   --multi-llm-only          (only multi-LLM)
     ```
     Output goes to `<results_dir>/robustness/` with JSON + CSV. Look for frameworks where cross-seed stddev is low and mean improvement remains high.
-13. **Deployment viability assessment**: The `diff_explanations.md` generated by `analyze_diffs.py` includes LLM-generated strategy explanations. After it's created, **add a "Deployment Viability" section** at the end assessing which discovered algorithms would transfer to a real llm-d deployment. For each framework, evaluate:
+14. **Deployment viability assessment**: The `diff_explanations.md` generated by `analyze_diffs.py` includes LLM-generated strategy explanations. After it's created, **add a "Deployment Viability" section** at the end assessing which discovered algorithms would transfer to a real llm-d deployment. For each framework, evaluate:
     - **Signals used**: Which RoutingSnapshot fields and Request fields does the algorithm read?
     - **Real-world availability**: Are those signals available in production? (InFlightRequests: router-local, always fresh. QueueDepth/BatchSize/KVUtilization: Prometheus ~5s scrape. FreeKVBlocks: needs adapter. CacheHitRate: vLLM 0.5+ only. SLOClass/SessionID: require custom headers.)
     - **Simulator-only constructs**: Does the algorithm use fields that don't exist in production? (OutputTokens, ProgressIndex, per-request CacheHitRate)
@@ -281,7 +306,7 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
     - **Architecture changes**: What middleware, struct modifications, or API extensions are needed?
     - **Deployment verdict**: HIGH (deploy as-is), MEDIUM (deploy with modifications), LOW (research only)
     - **Summary ranking** with recommended algorithm for immediate vs next-generation deployment
-14. Do NOT delete or modify output directories — they are the permanent record.
+15. Do NOT delete or modify output directories — they are the permanent record.
 
 ## Scoring
 

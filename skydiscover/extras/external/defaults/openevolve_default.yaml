@@ -24,7 +24,7 @@ evaluator:
   timeout: 360
   max_retries: 3
   cascade_evaluation: false
-  parallel_evaluations: 4
+  parallel_evaluations: 1
 
 prompt:
   num_top_programs: 3

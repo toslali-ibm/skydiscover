@@ -175,46 +175,53 @@ func (ws *WeightedScoring) Route(req *Request, state *RouterState) RoutingDecisi
 	}
 
 	// EVOLVE-BLOCK-START
-	// Compute composite scores from all scorers
+	// Glia HRA (Head-Room Allocator) adapted for BLIS per-request routing.
+	decodeToPromptRatio := 0.6
+	safetyFraction := 0.03
+	blockSize := 16.0
+
+	inputTokens := float64(len(req.InputTokens))
+	reqBlocks := (inputTokens*(1.0+decodeToPromptRatio) + blockSize - 1.0) / blockSize
+
 	scores := make(map[string]float64, len(snapshots))
-	for i, scorer := range ws.scorers {
-		dimScores := scorer(req, snapshots)
-		for _, snap := range snapshots {
-			s := dimScores[snap.ID]
-			// Clamp to [0,1] per scorer contract
-			if s < 0 {
-				s = 0
-			}
-			if s > 1 {
-				s = 1
-			}
-			scores[snap.ID] += s * ws.weights[i]
-		}
-	}
+	bestIdx := 0
+	bestScore := -1e18
 
-	// Argmax: select instance with highest composite score.
-	// Pass 1: find maximum score.
-	bestScore := -1.0
-	for _, snap := range snapshots {
-		if scores[snap.ID] > bestScore {
-			bestScore = scores[snap.ID]
-		}
-	}
-
-	// Pass 2: collect all instances tied at maximum score.
-	// Exact float equality is correct here because identical instance states produce
-	// bitwise-identical scores (same accumulation order on same data per IEEE 754).
-	var tied []int
 	for i, snap := range snapshots {
-		if scores[snap.ID] == bestScore {
-			tied = append(tied, i)
-		}
-	}
+		freeBlocks := float64(snap.FreeKVBlocks)
+		kvUtil := snap.KVUtilization
 
-	// Random tie-breaking when rng is non-nil; positional (first) when nil.
-	bestIdx := tied[0]
-	if len(tied) > 1 && ws.rng != nil {
-		bestIdx = tied[ws.rng.Intn(len(tied))]
+		var totalBlocks float64
+		if kvUtil > 0.001 && kvUtil < 0.999 {
+			totalBlocks = freeBlocks / (1.0 - kvUtil)
+		} else if kvUtil <= 0.001 {
+			totalBlocks = freeBlocks
+		} else {
+			totalBlocks = freeBlocks * 1000.0
+		}
+		if totalBlocks < 1.0 {
+			totalBlocks = 1.0
+		}
+
+		minFreeBlocks := totalBlocks * safetyFraction
+		allocatedBlocks := totalBlocks - freeBlocks
+		projectedUsage := allocatedBlocks + reqBlocks
+		freeAfter := totalBlocks - projectedUsage
+		admissible := freeAfter >= minFreeBlocks
+		queueLoad := float64(snap.QueueDepth + snap.BatchSize + snap.InFlightRequests)
+
+		var score float64
+		if admissible {
+			score = -projectedUsage/totalBlocks - 0.001*queueLoad
+		} else {
+			score = -10.0 - projectedUsage/totalBlocks - 0.001*queueLoad
+		}
+
+		scores[snap.ID] = score
+		if score > bestScore {
+			bestScore = score
+			bestIdx = i
+		}
 	}
 	// EVOLVE-BLOCK-END
 
