@@ -20,103 +20,33 @@ llm:
 prompt:
   system_message: |
     You are optimizing a routing algorithm for a 4-instance LLM inference cluster.
-    Your goal: minimize end-to-end latency across ALL workloads simultaneously.
+    Goal: minimize end-to-end latency across two workloads (general traffic + skewed prefix traffic).
 
-    STARTING POINT: 1:1 weighted router (prefix-affinity + load-balance with equal weights).
-    After normalization, weights are [0.5, 0.5]. This is already the strongest known
-    baseline — it beats pure load-balancing (LOR) by 25% on prefix-heavy traffic while
-    matching LOR on general traffic. It also beats Glia HRA (KV-admission-aware routing
-    from the Glia paper) on all tested workloads.
+    BASELINE: 1:1 weighted router — fixed 0.5 prefix-affinity + 0.5 load-balance.
+    Strong on general traffic, but vulnerable when prefix groups have unequal rates.
 
-    YOUR TASK: Beat the 1:1 baseline. Possible approaches:
-    - Adaptive weighting: increase prefix weight when cache is unevenly distributed,
-      increase load weight during traffic bursts
-    - Additional signals: KV utilization, request size, SLO class, session ID
-    - Novel scorer combinations the existing fixed-weight scorers can't capture
-    - Request-aware logic: different routing strategies for different request types
+    SCORERS (from routing_policy.yaml, loaded into ws.scorers/ws.weights):
+      ws.scorers[0] (weight 0.5) — prefix-affinity: returns ~1.0 for cached instances, ~0.0 otherwise.
+        Stateful LRU — observer updates automatically after routing. Fresh signal.
+      ws.scorers[1] (weight 0.5) — load-balance: 1/(1+EffectiveLoad()). Partly stale.
 
-    WORKLOADS (your algorithm is evaluated on ALL of these, equally weighted):
+    KEY SIGNALS:
+      snap.InFlightRequests — FRESH (updated before every routing call). Best load signal.
+      snap.KVUtilization — stale (5s), but useful as safety filter for memory pressure.
+      snap.QueueDepth, snap.BatchSize — stale (5s). Avoid as primary load signal.
 
-    Workload 1: glia_40qps — HIGH-THROUGHPUT GENERAL TRAFFIC
-      Bursty arrivals, no prefix groups, large requests.
-      What matters: LOAD BALANCING. Spread requests evenly, avoid pile-on.
-      The 1:1 baseline already matches the best pure load-balancer here — focus on not regressing.
+    OPPORTUNITY: The prefix_heavy workload has 6 prefix groups with skewed rates (45/18/12/10/8/7%)
+    across 4 instances, with large prefixes (14336 tokens). The fixed 0.5/0.5 weight creates a
+    hotspot on the dominant group's instance. An adaptive algorithm that reduces prefix weight
+    when the cached instance is overloaded can beat the baseline by 15%+ here.
 
-    Workload 2: glia_prefix_heavy — PREFIX-INTENSIVE TRAFFIC
-      High QPS, 4 prefix groups with massive shared prefixes, tiny per-request input/output.
-      What matters: PREFIX LOCALITY. Route same prefix group to same instance.
-      Cache hit = skip thousands of tokens of prefill. Cache miss = full recompute.
-      The 1:1 baseline beats pure load-balancers by 25% here thanks to prefix-affinity.
-      Opportunity: adaptive weighting could push further when cache is unevenly distributed.
-
-    === ACTIVE SCORERS (loaded from routing_policy.yaml into ws.scorers/ws.weights) ===
-    The baseline code iterates ws.scorers with ws.weights to compute composite scores.
-    Currently 2 scorers are configured (order matches routing_policy.yaml):
-
-      ws.scorers[0] / ws.weights[0] = 0.5 — "prefix-affinity"
-        Proportional prefix match ratio per instance. STATEFUL — maintains an internal
-        LRU tracking which prefixes are cached where. Returns higher scores for instances
-        that already cache this request's prefix.
-        Observer fires AUTOMATICALLY after EVOLVE-BLOCK to update LRU state.
-
-      ws.scorers[1] / ws.weights[1] = 0.5 — "load-balance"
-        1/(1 + EffectiveLoad()) per instance. Higher = less loaded.
-        EffectiveLoad() = QueueDepth(stale) + BatchSize(stale) + InFlightRequests(fresh)
-
-    Note: ws.scorers only contains what routing_policy.yaml configures. Names are not
-    stored on the struct at runtime — the order is determined by the YAML file.
-
-    === STANDALONE SCORER FUNCTIONS (same Go package, callable directly) ===
-    These are additional scorers NOT loaded into ws.scorers. They are package-level
-    Go functions you can call directly in the EVOLVE-BLOCK for extra scoring dimensions:
-
-      scoreLoadBalance(req, snapshots) → map[string]float64
-        Same formula as the "load-balance" active scorer above.
-
-      scoreQueueDepth(req, snapshots) → map[string]float64
-        Min-max normalized effective load: (maxLoad - load) / (maxLoad - minLoad).
-        All-equal loads → all score 1.0. Alternative to scoreLoadBalance that
-        emphasizes relative differences rather than absolute load.
-
-      scoreKVUtilization(req, snapshots) → map[string]float64
-        Returns 1 - KVUtilization per instance. Higher = more KV cache headroom.
-        WARNING: KVUtilization is STALE (up to 5s old). Use as a secondary signal
-        to avoid routing to memory-pressured instances, not as a primary load signal.
-
-    You can combine active scorer outputs with standalone scorer outputs, or bypass
-    ws.scorers entirely and build your own scoring from standalone functions + raw signals.
-
-    AVAILABLE RAW SIGNALS:
-      FRESH: snap.InFlightRequests (int)
-      STALE (5s): snap.QueueDepth (int), snap.BatchSize (int), snap.KVUtilization (float64, 0-1),
-                  snap.FreeKVBlocks (int64), snap.CacheHitRate (float64, 0-1)
-      DERIVED: snap.EffectiveLoad() (int) = QueueDepth + BatchSize + InFlightRequests
-      REQUEST: len(req.InputTokens) (int), req.SLOClass (string: "realtime"/"interactive"/"batch"),
-               req.SessionID (string, non-empty for multi-turn)
-
-    SIGNAL FRESHNESS MATTERS:
-      InFlightRequests is updated synchronously before each routing call — always accurate.
-      ALL other snapshot signals (including CacheHitRate) come from CachedSnapshotProvider's
-      periodic refresh — up to 5s stale. The prefix-affinity SCORER (ws.scorers[0]) maintains
-      its own fresh internal LRU, so prefer the scorer output over raw snap.CacheHitRate.
-      At 40-120 QPS, 200-600 requests arrive per staleness window.
-      Lean on InFlightRequests for load decisions. Use stale signals as secondary tiebreakers.
-
-    WARNINGS (common failure modes — avoid these):
-      - Removing load-balance entirely causes starvation on general workloads
-      - Fixed high prefix weight causes pile-on when all requests match one prefix
-      - QueueDepth as primary load signal is stale and causes oscillation at high QPS
-      - Guard all divisions against zero denominators (div-by-zero crashes the simulation)
-
-    RULES (compilation failures waste an iteration):
+    RULES:
     1. Only modify code between EVOLVE-BLOCK-START and EVOLVE-BLOCK-END
-    2. Must be valid Go — guard all divisions to avoid NaN/Inf
-    3. bestIdx must be valid: 0 <= bestIdx < len(snapshots)
-    4. scores[snap.ID] must be set for every instance (used for logging)
-    5. bestScore must be defined before EVOLVE-BLOCK-END
+    2. Valid Go — guard divisions against zero
+    3. scores[snap.ID] must be set for every instance; bestIdx must be valid
+    4. Don't remove load-balancing entirely — it prevents starvation on general traffic
 
-    EVALUATION: Score = mean percentage improvement over 1:1 baseline, averaged
-    equally across both workloads. Baseline = 0%. Positive = better.
+    Score = mean % improvement over baseline across both workloads. Positive = better.
 
 search:
   type: "adaevolve"

@@ -175,61 +175,6 @@ func (ws *WeightedScoring) Route(req *Request, state *RouterState) RoutingDecisi
 	}
 
 	// EVOLVE-BLOCK-START
-	// Default 1:1 weighted router: prefix-affinity (1.0) + load-balance (1.0).
-	// After weight normalization: ws.weights = [0.5, 0.5] (sum-to-1).
-	// This is the strongest known baseline across all workloads.
-	// YOUR TASK: Discover adaptive weighting, additional signals, or novel
-	// combinations that beat this baseline on diverse workloads simultaneously.
-	//
-	// === COMPILATION CONTRACT ===
-	// Post-EVOLVE-BLOCK code requires these variables to be defined:
-	//   bestIdx (int)   — index into snapshots[], must satisfy 0 <= bestIdx < len(snapshots)
-	//   bestScore (float64) — score of the selected instance
-	//   scores (map[string]float64) — must have an entry for every snap.ID (used for logging)
-	// Failure to define any of these causes a compilation error.
-	//
-	// === BUILT-IN SCORER FUNCTIONS (same package, callable directly) ===
-	//
-	// 1. scoreLoadBalance(req *Request, snapshots []RoutingSnapshot) map[string]float64
-	//    Returns: 1/(1 + EffectiveLoad()) per instance. Higher = less loaded.
-	//    EffectiveLoad() = QueueDepth(stale) + BatchSize(stale) + InFlightRequests(fresh)
-	//
-	// 2. scoreQueueDepth(req *Request, snapshots []RoutingSnapshot) map[string]float64
-	//    Returns: min-max normalized effective load. (maxLoad - load) / (maxLoad - minLoad)
-	//    All-equal loads → all score 1.0.
-	//
-	// 3. scoreKVUtilization(req *Request, snapshots []RoutingSnapshot) map[string]float64
-	//    Returns: 1 - KVUtilization per instance. Higher = more KV cache headroom.
-	//    WARNING: KVUtilization is STALE (up to 5s old from Prometheus scrape).
-	//
-	// 4. ws.scorers[0] is prefix-affinity (proportional prefix match ratio, STATEFUL)
-	//    ws.scorers[1] is load-balance (1/(1+EffectiveLoad))
-	//    Configured via routing_policy.yaml. Observer fires AUTOMATICALLY after EVOLVE-BLOCK.
-	//
-	// === RAW SIGNALS PER INSTANCE (snap RoutingSnapshot) ===
-	//   FRESH (synchronous):  snap.InFlightRequests (int)
-	//   STALE (up to 5s):     snap.QueueDepth (int), snap.BatchSize (int),
-	//                          snap.KVUtilization (float64, 0-1), snap.FreeKVBlocks (int64),
-	//                          snap.CacheHitRate (float64, 0-1, from CachedSnapshotProvider)
-	//   DERIVED:              snap.EffectiveLoad() (int) = QueueDepth + BatchSize + InFlightRequests
-	//
-	// NOTE: snap.CacheHitRate is from CachedSnapshotProvider (periodic, stale up to 5s).
-	// The prefix-affinity SCORER (ws.scorers[0]) maintains its own fresh internal LRU —
-	// but the raw snap.CacheHitRate signal is stale. Use the scorer for cache-aware routing;
-	// use the raw signal only as a secondary indicator.
-	//
-	// === REQUEST SIGNALS ===
-	//   len(req.InputTokens) (int), req.SLOClass (string: "critical"/"standard"/"batch"/etc.),
-	//   req.SessionID (string, non-empty for multi-turn)
-	//
-	// === STRATEGIES TO EXPLORE ===
-	//   - Adaptive cache weight: boost prefix-affinity when max CacheHitRate >> avg
-	//   - KV-aware routing: penalize instances near KV saturation for large requests
-	//   - SLO differentiation: realtime→least-loaded, batch→most-cached
-	//   - Session stickiness: hash(SessionID) → preferred instance, override if overloaded
-	//   - Size-aware: large input requests need more KV headroom
-	//   - Burst detection: spike in InFlightRequests → back off
-
 	// Compute composite scores from all scorers
 	scores := make(map[string]float64, len(snapshots))
 	for i, scorer := range ws.scorers {

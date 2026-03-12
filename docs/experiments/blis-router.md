@@ -145,6 +145,11 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 1. Run the pilot study to verify the pipeline: `python benchmarks/blis_router/scripts/pilot_study.py`
 2. Verify `routing.go` matches the submodule: `cd benchmarks/blis_router/inference-sim && git diff sim/routing.go`
 3. Ensure no stale artifacts exist: `ls benchmarks/blis_router/baseline_metrics.json` should fail
+4. **Run baseline comparison** to validate all baseline numbers against the exact workloads, LLMs, and seeds the evaluator will use:
+   ```bash
+   python benchmarks/blis_router/scripts/compare_baselines.py
+   ```
+   This runs LLQ, Glia, 3:2:2, and 1:1 against all active workloads/LLMs/seeds and writes `outputs/blis_router/baseline_comparison.json`. Verify the numbers are up to date — these are used for the monitoring comparison table. If the workloads, LLMs, or seeds in `evaluator.py` have changed since the last run, the old baseline numbers will be stale and MUST be refreshed.
 
 ### During Experiments
 
@@ -160,9 +165,15 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
 
    **Progress & improvement:**
    - Iterations completed / total (e.g., "35/100")
-   - Current best score and % improvement vs baseline (0 = parity, positive = better)
+   - Current best score and % improvement vs 1:1 baseline (0 = parity, positive = better)
    - When the last new best was found (iteration number)
    - Whether it's still improving or has plateaued
+
+   **Multi-baseline comparison** (read from `outputs/blis_router/baseline_comparison.json`):
+   - Show a table comparing the evolved best against LLQ, Glia, and 1:1 baselines
+   - Include per-workload e2e_ms and the aggregate score
+   - Use the active LLM model(s) only (e.g., qwen_7b if single-LLM mode)
+   - This puts the improvement in context — e.g., "beating Glia by 20%, approaching oracle"
 
    **Timing stats:**
    - Elapsed wall time since start
@@ -179,14 +190,33 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
    echo "=== LAST LINES ===" && tail -5 "$LOG"
    ```
 
-   **Format example** for user update:
+   **Monitoring update template** (MUST use this format for every update):
    ```
-   Update at ~12 min (iter 35/100):
-   - Validity: 25 successful, 10 build errors, 0 auth errors — healthy
-   - Best: +8.4 (8.4% improvement vs 1:1 baseline), found at iter 28
-   - Timing: 12.3 min elapsed, 34.2s/iter avg, ~37 min remaining
-   - Trend: last improvement 7 iters ago, still exploring
+   Monitoring Update — Iter 35/100 (35%)
+
+   | Metric   | Value                                            |
+   |----------|--------------------------------------------------|
+   | Progress | 35/100 (35%)                                     |
+   | Best     | +8.4% vs 1:1 (iter 28, plateau for 7 iters)      |
+   | Errors   | 10 build errors, 0 auth errors                   |
+   | Timing   | ~12 min elapsed, ~34s/iter, ~37 min remaining     |
+
+   Evolved (iter 28) vs baselines — qwen_7b:
+
+   | vs Baseline | glia_40qps | % imp  | prefix_heavy | % imp  | Combined |
+   |-------------|-----------|--------|-------------|--------|----------|
+   | LLQ         | 6357→4303 | +31.0% | 1300→724    | +49.0% | +40.0%   |
+   | Glia        | 4457→4303 | +4.0%  | 880→724     | +28.0% | +16.0%   |
+   | 3:2:2       | 4311→4303 | -0.8%  | 818→724     | +20.0% | +9.6%    |
+   | 1:1         | 4314→4303 | +0.3%  | 790→724     | +16.5% | +8.4%    |
+   | Oracle v14  | 4303→4303 | +0.0%  | 706→724     | -2.5%  | -1.3%    |
    ```
+
+   **How to compute the baseline comparison table:**
+   - Read baseline numbers from `outputs/blis_router/baseline_comparison.json` (qwen_7b entries)
+   - Use the evaluator's scoring formula: `val = 0.5×e2e + 0.5×p95`, then `improvement = (1 - evolved_val/baseline_val) × 100`
+   - Combined = mean of per-workload improvements (NOT average of raw ms — magnitudes differ)
+   - Show the evolved best's per-workload e2e values (from experiment logs) alongside each baseline
 
 8. After each framework completes, verify:
    - `routing.go` is unchanged from the original (evaluator restores it, but verify)
@@ -257,6 +287,25 @@ When a Claude session runs BLIS experiments, it MUST follow these rules:
     - Population quality comparison (pop size, best/median/worst scores, spread)
     - Key takeaways comparing accuracy vs cost tradeoffs
     - Experiment configuration (seed, model, api_base, temperature, inference-sim commit)
+    - **Final Monitoring Update** at the end of analysis.md — the same table format used during monitoring, showing the final state:
+      ```
+      | Metric   | Value                                            |
+      |----------|--------------------------------------------------|
+      | Progress | N/N (100%) COMPLETE                              |
+      | Best     | +X.X% vs 1:1 (iter K, converged for M iters)     |
+      | Errors   | E build errors, F failures                       |
+      | Timing   | X.X min total, X.Xs/iter avg                      |
+
+      Evolved (iter K) vs baselines — qwen_7b:
+
+      | vs Baseline | glia_40qps | % imp  | prefix_heavy | % imp  | Combined |
+      |-------------|-----------|--------|-------------|--------|----------|
+      | LLQ         | XXXX→XXXX | +XX.X% | XXXX→XXX    | +XX.X% | +XX.X%   |
+      | Glia        | XXXX→XXXX | +X.X%  | XXX→XXX     | +XX.X% | +XX.X%   |
+      | 3:2:2       | XXXX→XXXX | +X.X%  | XXX→XXX     | +XX.X% | +XX.X%   |
+      | 1:1         | XXXX→XXXX | +X.X%  | XXX→XXX     | +XX.X% | +XX.X%   |
+      | Oracle v14  | XXXX→XXXX | +X.X%  | XXX→XXX     | +X.X%  | +X.X%    |
+      ```
 
     **CRITICAL**: When adding a framework to an existing experiment, update ALL tables and findings in `analysis.md` — do not leave stale data from before the new framework was added.
 
@@ -309,17 +358,18 @@ score = mean(1 - candidate/baseline) × 100
 - Each workload contributes equally regardless of absolute latency magnitude
 - Per-workload metric: `0.5 * E2E + 0.5 * P95` (blended latency)
 - Tested on 2 workloads × N seeds (default 2 seeds: 42, 456): glia_40qps, prefix_heavy
+- prefix_heavy is a skewed 6-group workload (45/18/12/10/8/7%) with 14336-token prefixes at 85 QPS — designed to expose the 1:1 baseline's fixed-weight hotspot weakness
 - With `BLIS_MULTI_LLM=1`: averaged across N seeds × 2 models × 2 workloads
 - Baseline: 1:1 prefix-affinity + load-balance (the default `routing_policy.yaml` behavior)
 - Reference scores: LLQ (least-load queue) and LOR (least outstanding requests) typically score near 0 or slightly negative; Glia HRA scores vary by workload
 
 ## Multi-LLM Evaluation
 
-By default, the evaluator tests against two LLMs (qwen_7b + qwen_14b) to validate that discovered algorithms generalize across model sizes. Set `BLIS_MULTI_LLM=0` to use only qwen_7b for faster iterations.
+By default, the evaluator tests against a single LLM (qwen_7b) for faster iterations during search. Set `BLIS_MULTI_LLM=1` to test against both qwen_7b + qwen_14b for generalization validation (recommended for robustness checks after search).
 
 ```bash
-# Multi-LLM is ON by default. To disable:
-export BLIS_MULTI_LLM=0
+# Single-LLM is ON by default (qwen_7b only). To enable multi-LLM:
+export BLIS_MULTI_LLM=1
 export BLIS_OUTPUT_DIR="outputs/blis_router/${EXPERIMENT}/<FRAMEWORK>"
 export BLIS_SEED="42"
 ```
@@ -329,11 +379,11 @@ export BLIS_SEED="42"
 | `qwen_7b` | `qwen/qwen2.5-7b-instruct` | blackbox (trained coefficients) | H100, TP=1 |
 | `qwen_14b` | `qwen/qwen3-14b` | blackbox (trained coefficients) | H100, TP=1 |
 
-With default settings (multi-LLM ON, two seeds):
-- Each evaluation runs 8 simulations (2 seeds × 2 models × 2 workloads)
-- Evaluation time: ~24-48s per iteration depending on system load
-- With single-LLM (`BLIS_MULTI_LLM=0`): 4 sims, ~12-24s
-- `baseline_metrics.json` includes a `per_model` key with full per-model per-workload breakdowns
+With default settings (single-LLM, two seeds):
+- Each evaluation runs 4 simulations (2 seeds × 1 model × 2 workloads)
+- Evaluation time: ~12-24s per iteration depending on system load
+- With multi-LLM (`BLIS_MULTI_LLM=1`): 8 sims, ~24-48s
+- `baseline_metrics.json` includes a `per_model` key with full per-model per-workload breakdowns when multi-LLM is enabled
 - The combined score and per-workload values in the evaluate return dict are averaged across models
 - Analysis scripts work unchanged — they read the same top-level fields
 
@@ -380,8 +430,11 @@ uv run skydiscover-run \
 
 | Workload | YAML file | Tests |
 |----------|-----------|-------|
-| glia_40qps | `workload_glia_40qps.yaml` | Glia-derived workload at 40 QPS — tests routing under moderate load with realistic prefix-sharing patterns |
-| prefix_heavy | `workload_glia_prefix_heavy.yaml` | Heavy prefix-sharing scenario — tests prefix-affinity vs load-balance tradeoff under skewed prefix distributions |
+| glia_40qps | `workload_glia_40qps.yaml` | Glia-derived workload at 40 QPS — tests routing under moderate load with realistic prefix-sharing patterns. All baselines perform similarly here — the test is "don't regress." |
+| prefix_heavy | `workload_glia_prefix_heavy.yaml` | Skewed 6-group prefix workload (45/18/12/10/8/7% rate split) at 85 QPS with 14336-token prefixes. Designed to expose the 1:1 baseline's fixed-weight hotspot: the dominant group overloads one instance while an adaptive algorithm can spill overflow. Oracle-quality algorithms beat 1:1 by 15-20% and Glia by 30%+ here. |
+
+Additional workloads available in `workloads/old/` for reference (not used in evaluation):
+- Original Glia workloads: `glia_15qps`, `glia_25qps`, `glia_prefix`, plus earlier `v2_*` and `v3_*` variants.
 
 The baseline (1:1 prefix-affinity + load-balance, from `routing_policy.yaml`) is computed automatically on first evaluation. Baseline E2E latencies vary by model configuration — run `compare_results.py` after an experiment for exact numbers.
 

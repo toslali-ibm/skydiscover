@@ -64,7 +64,7 @@ SIM_SEEDS = (
     else _DEFAULT_SEEDS
 )
 SIM_NUM_INSTANCES = os.environ.get("BLIS_NUM_INSTANCES", "4")
-MULTI_LLM = os.environ.get("BLIS_MULTI_LLM", "1") == "1"
+MULTI_LLM = os.environ.get("BLIS_MULTI_LLM", "0") == "1"
 # Snapshot refresh interval in microseconds (5 seconds = realistic Prometheus scrape)
 SIM_SNAPSHOT_REFRESH = os.environ.get("BLIS_SNAPSHOT_REFRESH", "5000000")
 

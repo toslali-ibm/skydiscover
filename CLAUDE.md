@@ -61,7 +61,7 @@ EXPERIMENT="$(date +%y%m%d)_<N>i_<TAG>"
 # 4. Run a single framework
 export BLIS_OUTPUT_DIR="outputs/blis_router/${EXPERIMENT}/<FRAMEWORK>"
 export BLIS_SEED="42"  # single seed; omit for default two-seed (42,456)
-# Multi-LLM is ON by default (qwen_7b + qwen_14b). To disable: export BLIS_MULTI_LLM=0
+# Single-LLM is default (qwen_7b only). To enable multi-LLM: export BLIS_MULTI_LLM=1
 # Optional: export BLIS_NUM_INSTANCES=4  # default cluster size
 mkdir -p "$BLIS_OUTPUT_DIR"
 uv run skydiscover-run \
@@ -88,7 +88,7 @@ ls benchmarks/blis_router/baseline_metrics.json 2>/dev/null         # must not e
 - `Provider 'aws' requires api_base` → do NOT use `-m` flag; models are in config.yaml
 - EvoX 401 errors on label generation → fixed in `search/evox/controller.py` (propagates parent LLM config to search controller). If this recurs, the search controller's LLM config is being loaded from `search/evox/config/search.yaml` which defaults to OpenAI — the fix is to propagate `self.config.llm` to `controller_input.config.llm` in `_init_search_evolution_controller()`.
 - ShinkaEvolve (`-s shinkaevolve`) is **currently blocked** — it requires an embedding model (`text-embedding-3-small`) for code deduplication, and the IBM LiteLLM proxy does not serve embedding models. Do NOT attempt to run ShinkaEvolve until this is resolved. See [ShinkaEvolve Setup](docs/experiments/blis-router.md#shinkaevolve-setup) for details and unblocking options. Also requires `max_parallel_jobs: 1` for BLIS router.
-- Experiments take ~60s per iteration by default (LLM call + Go build + 8 simulations: 2 seeds × 2 LLMs × 2 workloads). With single-LLM (`BLIS_MULTI_LLM=0`), ~40s. With single seed + single LLM, ~30s
+- Experiments take ~40s per iteration by default (LLM call + Go build + 4 simulations: 2 seeds × 1 LLM × 2 workloads). With multi-LLM (`BLIS_MULTI_LLM=1`), ~60s (8 sims). With single seed + single LLM, ~30s
 
 ## Quick-Start: Run a Vidur Router Experiment
 
@@ -174,17 +174,39 @@ When running BLIS router experiments, Claude sessions MUST follow these rules:
 1. **Run pilot study first**: `python benchmarks/blis_router/scripts/pilot_study.py` — all tests must pass
 2. **Verify clean state**: No `baseline_metrics.json` or `.eval_artifacts` in `benchmarks/blis_router/`
 3. **Verify routing.go**: `cd benchmarks/blis_router/inference-sim && git diff sim/routing.go` must show no changes
+4. **Run baseline comparison**: `python benchmarks/blis_router/scripts/compare_baselines.py` — validates all baselines (LLQ, Glia, 3:2:2, 1:1) against the exact workloads, LLMs, and seeds in `evaluator.py`. Writes `outputs/blis_router/baseline_comparison.json`. These numbers are used in the monitoring comparison table and MUST be fresh.
 
 ### Mandatory During Experiments
 
 4. **Sequential execution only**: Run frameworks one at a time (openevolve → evox → adaevolve → gepa_native). They share `routing.go` and CANNOT run in parallel.
 5. **Always set `BLIS_OUTPUT_DIR`**: Every experiment's artifacts (baseline, logs) go to its own output directory. NEVER write to the benchmark directory.
 6. **Always set `BLIS_SEED`** (or use default): Default is two seeds `42,456` for robustness. Set `BLIS_SEED=42` for single-seed backward compat, or `BLIS_SEED=42,456,789` for custom multi-seed. Record the seed(s) with results.
-7. **Monitor every 2 minutes** while a framework is running. Use `sleep 120` in a background task, then check the log and report to the user. Each update MUST include:
-   - **Validity**: any errors in logs? (build failures, 401s, crashes). Count of successful vs failed iterations.
-   - **Progress**: iterations completed / total, best score so far, % improvement vs baseline
-   - **Timing**: elapsed time, avg seconds per iteration, estimated time remaining
-   - **Improvement trend**: when was the last new best found? is it still improving or plateaued?
+7. **Monitor every 2 minutes** while a framework is running. Use `sleep 120` in a background task, then check the log and report to the user. Each update MUST use this format:
+
+   ```
+   Monitoring Update — Iter N/Total (X%)
+
+   | Metric   | Value                                            |
+   |----------|--------------------------------------------------|
+   | Progress | N/Total (X%)                                     |
+   | Best     | +Y.Y% vs 1:1 (iter K, plateau for M iters)       |
+   | Errors   | E build errors, 0 auth errors                    |
+   | Timing   | ~Xm elapsed, ~Xs/iter, ~Xm remaining             |
+
+   Evolved (iter K) vs baselines — qwen_7b:
+
+   | vs Baseline | glia_40qps | % imp  | prefix_heavy | % imp  | Combined |
+   |-------------|-----------|--------|-------------|--------|----------|
+   | LLQ         | 6357→XXXX | +XX.X% | 1300→XXX    | +XX.X% | +XX.X%   |
+   | Glia        | 4457→XXXX | +X.X%  | 880→XXX     | +XX.X% | +XX.X%   |
+   | 3:2:2       | 4311→XXXX | +X.X%  | 818→XXX     | +XX.X% | +XX.X%   |
+   | 1:1         | 4314→XXXX | +X.X%  | 790→XXX     | +XX.X% | +XX.X%   |
+   | Oracle v14  | 4303→XXXX | +X.X%  | 706→XXX     | +X.X%  | +X.X%    |
+   ```
+
+   **Computing the baseline table**: Read from `outputs/blis_router/baseline_comparison.json` (qwen_7b entries).
+   Score formula: `val = 0.5×e2e + 0.5×p95`, `improvement = (1 - evolved/baseline) × 100`.
+   Combined = mean of per-workload improvements (NOT average of raw ms — magnitudes differ).
 
    Example monitoring command (adapt log path per framework):
    ```bash
@@ -215,7 +237,7 @@ When running BLIS router experiments, Claude sessions MUST follow these rules:
    python benchmarks/blis_router/scripts/analyze_effort.py "$RESULTS_DIR"
    python benchmarks/blis_router/scripts/analyze_diffs.py "$RESULTS_DIR"
    ```
-11. **Write or update `analysis.md`** in output dir. **Every number MUST come from script output or JSON files — never compute numbers manually.** Use `comparison_table.csv` for all per-workload and aggregate numbers (it includes the baseline row). Use `reference_scores.json` for multi-baseline comparison (LLQ, LOR, Glia scored against 1:1 baseline). Use `effort_analysis.json` for effort metrics. If a number isn't in any script output, add it to the script first. Must include: accuracy tables, **multi-baseline comparison table (LLQ/LOR/Glia/1:1/evolved)**, per-workload E2E table, per-workload P95 table, % improvement, effort summary, search efficiency, convergence, population quality, key takeaways, experiment config. **CRITICAL**: When adding a framework to an existing experiment, update ALL tables — do not leave stale data. See [blis-router.md](docs/experiments/blis-router.md#after-experiments-run-all-steps--even-when-adding-one-framework-to-an-existing-experiment) for full checklist.
+11. **Write or update `analysis.md`** in output dir. **Every number MUST come from script output or JSON files — never compute numbers manually.** Use `comparison_table.csv` for all per-workload and aggregate numbers (it includes the baseline row). Use `reference_scores.json` for multi-baseline comparison (LLQ, LOR, Glia scored against 1:1 baseline). Use `effort_analysis.json` for effort metrics. If a number isn't in any script output, add it to the script first. Must include: accuracy tables, **multi-baseline comparison table (LLQ/LOR/Glia/3:2:2/1:1/evolved)**, per-workload E2E table, per-workload P95 table, % improvement, effort summary, search efficiency, convergence, population quality, key takeaways, experiment config, **and a "Final Monitoring Update" section at the end** using the same monitoring table format (progress/best/errors/timing + evolved vs all baselines per workload). **CRITICAL**: When adding a framework to an existing experiment, update ALL tables — do not leave stale data. See [blis-router.md](docs/experiments/blis-router.md#after-experiments-run-all-steps--even-when-adding-one-framework-to-an-existing-experiment) for full checklist.
 12. **Merge baseline metrics into best_program_info.json**: For each framework, copy the contents of `<framework>/baseline_metrics.json` into `<framework>/best/best_program_info.json` as a new top-level `"baseline_metrics"` key. This makes each best program self-contained for downstream comparison.
 13. **Robustness validation** (recommended before transferring algorithms):
    ```bash

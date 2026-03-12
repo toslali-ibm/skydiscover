@@ -40,17 +40,14 @@ POLICY_CONFIG_PATH = SCRIPT_DIR / "routing" / "routing_policy.yaml"
 # ── Routing configs: (name, program_path, policy_yaml_path) ──
 CONFIGS = [
     ("llq", SCRIPT_DIR / "algos" / "initial_program_llq.go", POLICY_CONFIG_PATH),
-    ("lor", SCRIPT_DIR / "algos" / "initial_program_lor.go", POLICY_CONFIG_PATH),
     ("glia", SCRIPT_DIR / "algos" / "initial_program_glia.go", POLICY_CONFIG_PATH),
     ("1_1", SCRIPT_DIR / "initial_program.go", POLICY_CONFIG_PATH),
-    ("3_2_2", SCRIPT_DIR / "initial_program.go", SCRIPT_DIR / "routing" / "routing_policy_3_2_2.yaml"),
 ]
 
 # ── Workloads ──
 WORKLOADS = [
-    ("glia_prefix_heavy", "workload_glia_prefix_heavy.yaml"),
-    ("glia_25qps", "workload_glia_25qps.yaml"),
     ("glia_40qps", "workload_glia_40qps.yaml"),
+    ("glia_prefix_heavy", "workload_glia_prefix_heavy.yaml"),
 ]
 
 # ── Models and seeds ──
