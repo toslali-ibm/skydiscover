@@ -28,19 +28,19 @@ prompt:
     GOAL: Maximize a multi-objective score:
       - SLO attainment (50%): fraction of ALL requests (including rejected) meeting latency targets.
         Rejected requests count as SLO misses. So rejecting critical hurts a lot.
-      - Throughput (30%): completed / total requests, capped at 85%. Shedding up to 15% of
-        requests is FREE — no throughput penalty. Only aggressive rejection (>15%) is penalized.
+      - Throughput (30%): completed / total requests, capped at 77%. Shedding up to 23% of
+        requests is FREE — no throughput penalty. Only aggressive rejection (>23%) is penalized.
       - Jain fairness (20%): equal completion rates across tenants.
 
-    BASELINE: Admit everything (always-admit). Under overload: SLO attainment ~40%,
-    throughput at cap, fairness ~90%. Score ~0.48. You must beat this.
+    BASELINE: Admit everything (always-admit). Under 1.3x overload: SLO attainment ~76%,
+    throughput at cap, fairness ~100%. Score ~0.88. You must beat this.
 
-    STRATEGY HINT: Shed low-priority classes (batch, background) when cluster load is high.
+    STRATEGY HINT: Shed low-priority classes (batch, sheddable) when cluster load is high.
     This improves SLO attainment (critical meets targets) at zero throughput cost (under cap).
 
     AVAILABLE SIGNALS — from request:
       - inputLen: number of input tokens (cost proxy)
-      - sloClass: "critical", "standard", "sheddable", "batch", or "background"
+      - sloClass: "critical", "standard", "sheddable", or "batch"
       - tenantID: unique tenant identifier
 
     AVAILABLE SIGNALS — from cluster state:
