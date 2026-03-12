@@ -1,0 +1,90 @@
+language: go
+file_suffix: .go
+diff_based_generation: false
+max_iterations: 50
+checkpoint_interval: 5
+max_solution_length: 40000
+
+llm:
+  models:
+    - name: "aws/claude-sonnet-4-5"
+      weight: 0.7
+    - name: "aws/claude-opus-4-6"
+      weight: 0.3
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  temperature: 1.0
+  top_p: null
+  max_tokens: 32000
+  timeout: 120
+
+prompt:
+  system_message: |
+    You are optimizing an admission control policy for a 4-instance LLM inference cluster.
+
+    PROBLEM: Under overload, admitting everything causes queues to explode and critical
+    tenants to be starved. Your job is to selectively reject low-priority requests to
+    protect high-priority ones while maintaining throughput.
+
+    GOAL: Maximize a multi-objective score:
+      - SLO attainment (50%): fraction of ALL requests (including rejected) meeting latency targets.
+        Rejected requests count as SLO misses. So rejecting critical hurts a lot.
+      - Throughput (30%): completed / total requests, capped at 85%. Shedding up to 15% of
+        requests is FREE — no throughput penalty. Only aggressive rejection (>15%) is penalized.
+      - Jain fairness (20%): equal completion rates across tenants.
+
+    BASELINE: Admit everything (always-admit). Under overload: SLO attainment ~40%,
+    throughput at cap, fairness ~90%. Score ~0.48. You must beat this.
+
+    STRATEGY HINT: Shed low-priority classes (batch, background) when cluster load is high.
+    This improves SLO attainment (critical meets targets) at zero throughput cost (under cap).
+
+    AVAILABLE SIGNALS — from request:
+      - inputLen: number of input tokens (cost proxy)
+      - sloClass: "critical", "standard", "sheddable", "batch", or "background"
+      - tenantID: unique tenant identifier
+
+    AVAILABLE SIGNALS — from cluster state:
+      - numInstances: number of instances (4)
+      - totalInFlight: sum of InFlightRequests across all instances (FRESH every call)
+      - totalQueueDepth: sum of QueueDepth across instances (stale up to 5s)
+      - maxKVUtil: highest KVUtilization across instances (stale up to 5s)
+      - avgKVUtil: mean KVUtilization (stale up to 5s)
+      - minFreeKV: fewest FreeKVBlocks on any instance (stale up to 5s)
+      - clock: simulation clock in microseconds
+
+    AVAILABLE STATE — persistent across calls (read/write via a.*):
+      - a.tenantTokens[tenantID]: float64 budget per tenant
+      - a.tenantRequests[tenantID]: int counter per tenant
+      - a.classCounters[sloClass]: int counter per SLO class
+      - a.windowStart, a.windowCount: sliding window tracking
+      - a.totalAdmitted, a.totalRejected: lifetime counters
+      - a.lastClock: previous call's clock value
+
+    Return (true, "") to admit, (false, "reason") to reject.
+
+    KEY INSIGHT from routing experiments: InFlightRequests is the best load signal
+    (fresh, router-local). KVUtilization is useful as a safety filter (>90% = memory pressure).
+    Stale signals (QueueDepth) should not be primary decision factors.
+
+    RULES (compilation failures waste an iteration):
+    1. Only modify code between EVOLVE-BLOCK-START and EVOLVE-BLOCK-END
+    2. Must be valid Go — guard all divisions to avoid divide-by-zero
+    3. Must return (bool, string) — true to admit, false to reject
+    4. Use the pre-provisioned state maps — don't add struct fields
+    5. All map reads on tenantTokens/tenantRequests/classCounters are safe (pre-initialized)
+
+    EVALUATION: 2 overload workloads with heterogeneous tenants.
+      - overload_mixed_slo: sustained 1.3x overload, 3 SLO tiers (critical/standard/batch)
+      - bursty_adversary: 1 steady critical tenant + 1 extremely bursty bulk tenant
+
+    SLO TARGETS (E2E ms): calibrated from pilot data — see evaluator.
+
+search:
+  type: "adaevolve"
+  num_context_programs: 4
+  database:
+    random_seed: 42
+
+evaluator:
+  timeout: 300
+  cascade_evaluation: false

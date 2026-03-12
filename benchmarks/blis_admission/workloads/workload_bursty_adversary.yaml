@@ -1,0 +1,51 @@
+# Bursty Adversary: 1 steady critical tenant + 1 extremely bursty bulk tenant.
+# Tests: Can the policy isolate critical during burst events without over-rejecting in calm periods?
+#
+# aggregate_rate is set by calibrate_capacity.py (Phase 0).
+# Placeholder: 70 QPS (~1.1x baseline, bursts push to ~1.8x).
+
+version: "1"
+seed: 42
+category: language
+aggregate_rate: 208
+num_requests: 12480     # 60s at 208 req/s (1.3x calibrated saturation)
+
+clients:
+  - id: steady-critical
+    tenant_id: tenant-critical
+    slo_class: critical
+    rate_fraction: 0.25
+    streaming: true
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 128
+        std_dev: 32
+        min: 32
+        max: 256
+    output_distribution:
+      type: exponential
+      params:
+        mean: 64
+
+  - id: bulk-adversary
+    tenant_id: tenant-bulk
+    slo_class: sheddable
+    rate_fraction: 0.75
+    streaming: false
+    arrival:
+      process: gamma
+      cv: 4.0
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 768
+        std_dev: 256
+        min: 128
+        max: 2048
+    output_distribution:
+      type: exponential
+      params:
+        mean: 256

@@ -1,0 +1,19 @@
+{
+  "slo_targets": {
+    "batch": 30297,
+    "critical": 1243,
+    "standard": 3055,
+    "sheddable": 16107
+  },
+  "throughput_cap": 0.77,
+  "workloads": {
+    "overload_mixed_slo": {
+      "saturation_rate": 160,
+      "overload_rate": 208
+    },
+    "bursty_adversary": {
+      "saturation_rate": 160,
+      "overload_rate": 208
+    }
+  }
+}

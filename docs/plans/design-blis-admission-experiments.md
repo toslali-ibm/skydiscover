@@ -2,13 +2,15 @@
 
 ## Goal
 
-Discover adaptive admission control policies for multi-tenant LLM inference clusters using the same evolutionary framework used for routing optimization. Compare search frameworks on their ability to find policies that balance the **impossible triangle**:
+Discover an adaptive admission control policy for multi-tenant LLM inference clusters. BLIS currently has **no admission control** — under overload, all requests are admitted and queues explode. We want to evolve a policy that **sheds low-priority work to protect high-priority tenants** while maximizing throughput.
 
-1. **Utilization**: Maximize throughput — don't reject too aggressively
-2. **Fairness**: Equal service quality across tenants (Jain fairness index)
-3. **Isolation**: Protect critical tenants from bad actors and bursty bulk traffic
+This is practical: the evolved policy will transfer directly to llm-d's admission control hook.
 
-Static admission policies (always-admit, token-bucket) fail with heterogeneous tenants and dynamic traffic because they can't simultaneously optimize all three. An evolved adaptive policy observes cluster state and request metadata to make context-dependent admit/reject decisions.
+### Success Criteria
+
+1. Evolved policy beats `always-admit` on SLO attainment under overload (critical requests meet targets)
+2. Evolved policy maintains >70% throughput (doesn't over-reject)
+3. Policy uses only production-available signals (InFlightRequests, SLOClass, TenantID)
 
 ---
 
@@ -24,23 +26,17 @@ The routing benchmark (`benchmarks/blis_router/`) provides the proven pattern:
 - `initial_program.go`: Full Go source file with EVOLVE-BLOCK markers, replaces `sim/routing.go` during evaluation
 - `evaluator.py`: Extract Go → write file → `go build` → run simulations → parse metrics → return score
 - Sequential evaluation (shared Go file), ~30-60s per iteration
-- Scoring: `score = -0.5 * avg_e2e_ms - 0.5 * avg_p95_ms`
-
-This benchmark reuses the same infrastructure, replacing: (a) the file being evolved (`admission.go` instead of `routing.go`), (b) the fitness function (multi-objective instead of pure latency), and (c) the workloads (overload scenarios instead of balanced load).
+- OpenEvolve: 0% build errors, best results in 16/50 iterations (~10 min)
 
 ### Key Differences from Routing Evolution
 
 | Aspect | Routing | Admission Control |
 |--------|---------|-------------------|
 | What it controls | Which instance handles a request | Whether a request enters the system at all |
-| Fitness landscape | Unimodal (lower latency = better) | Multi-objective with tension (reject more → better latency but worse utilization) |
-| Search space | Stateless scoring math | Stateful strategies (rate trackers, per-tenant budgets, sliding windows) |
+| Fitness landscape | Unimodal (lower latency = better) | Multi-objective (reject more → better latency but worse utilization) |
+| Search space | Stateless scoring math | Stateful strategies (rate trackers, per-tenant budgets) |
 | Workload requirement | Balanced load (below capacity) | **Overload** (above capacity, forcing selective shedding) |
 | File evolved | `sim/routing.go` | `sim/admission.go` |
-
-### Key Constraint
-
-Same as routing: evaluation is **sequential** because each iteration writes to the same `admission.go`, rebuilds the Go binary, then runs simulations. ~30-60s per evaluation.
 
 ---
 
@@ -52,17 +48,14 @@ Same as routing: evaluation is **sequential** because each iteration writes to t
 benchmarks/blis_admission/
 ├── initial_program.go          # Full admission.go with AdaptiveAdmission + EVOLVE-BLOCK
 ├── evaluator.py                # Build BLIS, run overload workloads, return multi-objective score
-├── config.yaml                 # SkyDiscover config with admission-specific system prompt
-├── README.md
+├── config.yaml                 # SkyDiscover config
 ├── workloads/                  # Overload workload specs (v2 format)
 │   ├── workload_v2_overload_mixed_slo.yaml
-│   ├── workload_v2_bursty_adversary.yaml
-│   └── workload_v2_diurnal_heterogeneous.yaml
-├── routing/                    # Policy bundle — routing stays fixed, admission is "adaptive"
-│   └── routing_policy.yaml
-├── inference-sim/              # Git submodule (same as blis_router)
+│   └── workload_v2_bursty_adversary.yaml
+├── routing/
+│   └── routing_policy.yaml     # Fixed routing (1:1 weighted), only admission evolves
+├── inference-sim/              # Symlink → ../blis_router/inference-sim
 └── scripts/
-    ├── run_all_frameworks.sh
     ├── compare_results.py
     ├── plot_results.py
     ├── analyze_effort.py
@@ -71,7 +64,7 @@ benchmarks/blis_admission/
 
 ### 2. The Initial Program
 
-The initial program is a complete replacement for `sim/admission.go`. It must include all existing types (`AlwaysAdmit`, `TokenBucket`, `RejectAll`) because other code references them. It adds `AdaptiveAdmission` with pre-provisioned state and an EVOLVE-BLOCK.
+Complete replacement for `sim/admission.go`. Must include all existing types (`AlwaysAdmit`, `TokenBucket`, `RejectAll`).
 
 **Source**: `docs/study/admission_initial_program.go` (already drafted).
 
@@ -79,9 +72,7 @@ Key design decisions:
 - **Pre-derived signals above the EVOLVE-BLOCK** (fixed, not mutable): `numInstances`, `totalInFlight`, `totalQueueDepth`, `maxKVUtil`, `avgKVUtil`, `minFreeKV`, `inputLen`, `sloClass`, `tenantID`, `clock`
 - **Pre-provisioned mutable state on the struct**: `tenantTokens`, `tenantRequests`, `classCounters`, `windowStart`, `windowCount`, `totalAdmitted`, `totalRejected`, `lastClock`
 - **Baseline behavior**: `return true, ""` (admit everything — identical to `always-admit`)
-- **Factory trick**: No new policy name needed. The `"always-admit"` case in `NewAdmissionPolicy` is remapped to `return NewAdaptiveAdmission()`. Since the baseline EVOLVE-BLOCK is `return true, ""`, behavior is identical to the original `AlwaysAdmit`. The YAML stays `policy: always-admit`, and `bundle.go` is untouched — **zero inference-sim changes required**.
-
-The LLM can only mutate the block between `EVOLVE-BLOCK-START` and `EVOLVE-BLOCK-END`. Everything else is frozen.
+- **Factory trick**: The `"always-admit"` case in `NewAdmissionPolicy` is remapped to `return NewAdaptiveAdmission()`. YAML stays `policy: always-admit`, `bundle.go` untouched — **zero inference-sim changes required**.
 
 ### 3. The Evaluator
 
@@ -92,99 +83,92 @@ Same pattern as the routing evaluator. Key differences noted with **[DIFF]**.
 def evaluate(program_path: str) -> dict:
     # 1. Extract Go code from evolved program file
     # 2. [DIFF] Save original admission.go, write evolved code to inference-sim/sim/admission.go
-    # 3. go build -o blis main.go
-    # 4. [DIFF] For each (model, seed, workload) combination:
-    #      Run: ./blis run --model <id> --hardware H100 --tp 1
+    # 3. go build -o simulation_worker main.go
+    # 4. [DIFF] For each (seed, workload) combination:
+    #      Run: ./simulation_worker run --model <id> --hardware H100 --tp 1
     #                      --num-instances 4 --policy-config routing_policy.yaml
     #                      --workload-spec <workload.yaml> --seed <seed>
     #                      --snapshot-refresh-interval 5000000
-    #                      --results-path <tmpfile.json>    # [DIFF] enables per-request output
+    #                      --results-path <tmpfile.json>    # [DIFF] per-request output
     #                      --log info
-    # 5. [DIFF] Parse ALL metrics from --results-path JSON file (not stdout).
-    #    The file is always written even when CompletedRequests==0 (reject-all edge case).
-    #    Extract: injected_requests, completed_requests, e2e stats, per-request records.
-    #    Derive: rejected = num_requests (from workload YAML) - injected_requests (INV-1).
-    # 6. [DIFF] Compute multi-objective score from per-request records (slo_class, tenant_id, e2e_ms)
-    # 7. [DIFF] Clean up tmpfile after parsing
-    # 8. [DIFF] Restore original admission.go in finally block
+    # 5. [DIFF] Parse from --results-path JSON:
+    #    - injected_requests, completed_requests, per-request records (slo_class, tenant_id, e2e_ms)
+    #    - Derive: rejected = num_requests (from workload YAML) - injected_requests (INV-1)
+    # 6. [DIFF] Compute multi-objective score
+    # 7. Restore original admission.go in finally block
     return {
         "combined_score": score,
-        # --- Multi-objective components ---
-        "slo_attainment": ...,          # fraction of per-class SLO targets met [0,1]
-        "jain_fairness": ...,           # JainFairnessIndex across tenants [0,1]
-        "utilization": ...,             # completed / (completed + rejected) [0,1]
-        "critical_rejection_rate": ..., # 1 - (completed_critical / expected_critical) [0,1]
-        "avg_e2e_ms": ...,              # mean E2E for admitted requests
-        "avg_p95_ms": ...,              # P95 E2E for admitted requests
-        # --- Per-workload breakdown ---
-        "overload_mixed_slo_score": ...,
-        "bursty_adversary_score": ...,
-        "diurnal_heterogeneous_score": ...,
-        # --- Diagnostics ---
+        "slo_attainment": ...,
+        "throughput": ...,
+        "jain_fairness": ...,
+        "avg_e2e_ms": ...,
+        "avg_p95_ms": ...,
         "total_rejected": ...,
-        "success_rate": ...,
-        "artifacts": { ... },
+        "per_workload_scores": { ... },
     }
 ```
 
-**[DIFF] Model/hardware configuration**: Same as the routing evaluator — two models evaluated by default:
+**Model/hardware**: Single-LLM by default (`BLIS_MULTI_LLM=0`, matching routing convention):
 
 | Short name | Model ID | Hardware | TP |
 |------------|----------|----------|----|
 | `qwen_7b` | `qwen/qwen2.5-7b-instruct` | H100 | 1 |
-| `qwen_14b` | `qwen/qwen3-14b` | H100 | 1 |
 
-Controlled by `BLIS_MULTI_LLM` env var (default: on). Same `BLIS_SEED`, `BLIS_NUM_INSTANCES` env vars as routing evaluator.
+Multi-LLM validation (`qwen_14b`) is a separate pass after promising policies are found.
 
-**[DIFF] Fitness formula** (multi-objective, higher = better):
+**[DIFF] Fitness formula** (3 terms, all [0,1], higher = better):
 
 ```
-score = 0.30 * slo_attainment
-      + 0.25 * jain_fairness
-      + 0.20 * utilization
-      - 0.15 * critical_rejection_rate
-      - 0.10 * normalized_p95
+score = 0.50 * slo_attainment
+      + 0.30 * capped_throughput
+      + 0.20 * jain_fairness
 ```
 
 Where:
-- `slo_attainment` = fraction of completed requests meeting per-class E2E targets. Computed in Python from per-request JSON (via `--results-path`): for each request, `e2e_ms <= slo_target[slo_class]`.
-- `jain_fairness` = Jain index across tenant throughputs. Computed in Python: group completed requests by `tenant_id`, count per-tenant, apply `(sum(xi))^2 / (N * sum(xi^2))`.
-- `utilization` = `completed_requests / (completed_requests + rejected_requests)`. Both fields from stdout JSON.
-- `critical_rejection_rate` = `1 - (completed_critical / expected_critical)` where `expected_critical = num_requests * critical_rate_fraction` (proxy — rejected requests have no per-request records)
-- `normalized_p95` = weighted average of per-class `p95_e2e_ms / class_slo_target_ms`, clamped to [0,1]. Uses the per-class SLO targets above as denominators.
+- **`slo_attainment`** = `(completed requests meeting SLO) / num_requests`. Rejected requests count as SLO misses. This naturally penalizes rejecting critical requests (they didn't meet their SLO) while rewarding shedding batch/background (whose SLOs would be missed under overload anyway).
+- **`capped_throughput`** = `min(completed_requests / num_requests, THROUGHPUT_CAP) / THROUGHPUT_CAP`. The cap (default 0.85) means both `always-admit` (throughput=1.0) and a good shedding policy (throughput=0.85) score 1.0 on this term. This **eliminates the penalty for moderate rejection**, creating a smooth gradient from always-admit toward smart shedding. Only aggressive rejection (below 85% throughput) is penalized. The cap value is set to `1 - overload_fraction / (1 + overload_fraction)` — for 1.3x overload, this is ~0.77, rounded up to 0.85 for margin.
+- **`jain_fairness`** = Jain index over per-tenant completion rates. `N = total tenants in workload spec` (not tenants with completions — this prevents "admit only one tenant" from scoring Jain=1.0). Formula: `(sum(xi))^2 / (N * sum(xi^2))` where `xi = completed_tenant_i / expected_tenant_i`. Guard: if all `xi=0`, `jain_fairness = 0.0`.
 
-**[DIFF] SLO targets** (E2E latency, ms):
+**Why 3 terms, not 5**: The original 5-term formula had `critical_rejection_rate` (subsumed by `slo_attainment` since rejected = SLO miss) and `normalized_p95` (noise on top of `slo_attainment`). Fewer terms = clearer gradient for the LLM = faster convergence.
 
-| SLO Class | Target |
-|-----------|--------|
-| critical | 500 |
-| standard | 2000 |
-| sheddable | 5000 |
-| batch | 10000 |
-| background | 30000 |
+**Why throughput cap**: Without the cap, `always-admit` scores throughput=1.0 and any rejection immediately hurts 2 of 3 terms (throughput drops, fairness may drop) before slo_attainment improves enough to compensate. This creates a shallow gradient that discourages the LLM from exploring rejection strategies. The cap removes this barrier — shedding up to ~15% of requests is "free" on the throughput term, so the LLM only needs slo_attainment to improve to see score gains.
 
-**[DIFF] Extracting new metrics from simulator output**:
+**Degenerate strategy analysis** (at 1.3x overload):
+- "Reject everything" → slo_attainment=0, throughput=0, fairness=0 → **score=0.0**
+- "Admit everything" → slo_attainment=~0.4, throughput=1.0 (capped to 1.0), fairness=~0.9 → **score=~0.48**
+- "Admit only critical" → slo_attainment=~0.2, throughput=0.2/0.85=0.24, fairness=~0.33 → **score=~0.24**
+- "Smart shedding" (shed batch when overloaded) → slo_attainment=~0.7, throughput=0.85 (capped to 1.0), fairness=~0.8 → **score=~0.81**
+- "Reject only batch" (40% rejected) → slo_attainment=~0.58, throughput=0.6/0.85=0.71, fairness=~0.67 → **score=~0.64**
 
-**No sim changes required.** All metrics are derived from existing output:
+The formula correctly ranks: smart shedding > reject-only-batch > always-admit > admit-only-critical > reject-all. The throughput cap widens the gap between always-admit (0.48) and smart shedding (0.81), giving the search a strong gradient.
 
-- **Primary data source**: `--results-path <tmpfile>` JSON file. This is always written (even when `CompletedRequests == 0`), unlike stdout JSON which is suppressed when no requests complete. The file contains both aggregate metrics (`injected_requests`, `completed_requests`, latency stats) and per-request records (`slo_class`, `tenant_id`, `e2e_ms`). Tmpfile is cleaned up after parsing.
-- **`rejected_requests`**: Derived via INV-1: `rejected = num_requests - injected_requests`. `num_requests` is from the workload YAML; `injected_requests` is in the `--results-path` JSON.
-- **`utilization`**: `completed_requests / (completed_requests + rejected_requests)`. Both values available from the JSON file.
+**[DIFF] SLO targets** (calibrated during Phase 0 pilot):
 
-**Evaluator strategy** (all computed in Python from `--results-path` data):
-- `slo_attainment`: For each completed request in the `requests` array, check `e2e_ms <= slo_target[slo_class]`, take fraction.
-- `jain_fairness`: Group completed requests by `tenant_id`, count per-tenant throughput, apply Jain formula `(sum(xi))^2 / (N * sum(xi^2))`.
-- `critical_rejection_rate`: `1 - (completed_critical / expected_critical)` where `expected_critical = num_requests * critical_rate_fraction` (from workload spec).
-- `utilization`: `completed_requests / (completed_requests + rejected_requests)` using INV-1 derivation above.
+| SLO Class | Target | Rationale |
+|-----------|--------|-----------|
+| critical | TBD (~P75 at 1.0x capacity) | Must be achievable with good admission |
+| standard | TBD (~P90 at 1.0x capacity) | Generous but meaningful |
+| sheddable | TBD | |
+| batch | TBD | |
+| background | TBD | Essentially no deadline |
 
-**Edge case**: If the evolved policy rejects everything, `CompletedRequests == 0`, `injected_requests == 0`, `utilization == 0`, `slo_attainment == 0`, `jain_fairness == 0`. The combined score will be very low (~0.0), providing strong negative signal to the search framework.
+**Phase 0 will measure actual latencies** at 1.0x capacity with `always-admit` and set targets accordingly. The routing experiment showed ~4300ms E2E at 40 QPS with 500-token requests — the admission workloads use smaller tokens (128-512), so latencies will be lower, but exact values must be measured.
+
+**[DIFF] Extracting metrics from simulator output**:
+
+**No sim changes required.** All metrics from `--results-path` JSON:
+- Per-request records with `slo_class`, `tenant_id`, `e2e_ms` → compute `slo_attainment` and `jain_fairness` in Python
+- `injected_requests` field → derive `rejected = num_requests - injected_requests` (INV-1)
+- `num_requests` parsed from workload YAML (not in JSON — evaluator reads YAML separately)
+
+**Edge case**: Reject-all → `completed=0`, `injected=0`, all metrics = 0, score = 0.0. Strong negative signal.
 
 ### 4. Policy Bundle
 
 ```yaml
 # benchmarks/blis_admission/routing/routing_policy.yaml
 admission:
-  policy: always-admit        # Factory remapped in initial_program.go to AdaptiveAdmission
+  policy: always-admit        # Factory remapped to AdaptiveAdmission in initial_program.go
 routing:
   policy: weighted
   scorers:
@@ -197,13 +181,13 @@ priority:
 scheduler: fcfs
 ```
 
-Routing, priority, and scheduling are **fixed** at their defaults. Only admission is evolved.
-
-**No sim changes required**: The factory remapping in the initial program handles policy creation. The YAML uses `always-admit` which passes existing validation.
+Routing, priority, and scheduling are **fixed**. Only admission is evolved.
 
 ### 5. Workloads
 
-All three workloads must produce **overload** — aggregate arrival rate exceeding cluster capacity — to force the admission policy to make non-trivial shedding decisions. Under balanced load, `always-admit` is optimal and there's nothing to evolve.
+Both workloads must produce **overload** — arrival rate exceeding cluster capacity — to force non-trivial shedding. Under balanced load, `always-admit` is optimal.
+
+**Overload rates are TBD** — calibrated in Phase 0 pilot. The routing experiments show the 4-instance qwen_7b/H100 cluster saturates at ~40-85 QPS with 200-500 token requests. With the smaller tokens in admission workloads (128-512), capacity is likely 60-150 QPS. Overload = 1.3x that.
 
 #### Workload 1: `overload_mixed_slo`
 
@@ -213,8 +197,8 @@ All three workloads must produce **overload** — aggregate arrival rate exceedi
 version: "2"
 seed: 42
 category: language
-aggregate_rate: 450        # ~1.5x capacity of 4-instance cluster (~300 req/s)
-num_requests: 27000        # 60s at 450 req/s
+aggregate_rate: TBD            # 1.3x capacity, calibrated in Phase 0
+num_requests: TBD              # 60s worth at aggregate_rate
 
 clients:
   - id: realtime-api
@@ -253,8 +237,8 @@ clients:
 version: "2"
 seed: 42
 category: language
-aggregate_rate: 400        # ~1.3x capacity at baseline, ~2x during bursts
-num_requests: 24000
+aggregate_rate: TBD            # 1.1x capacity baseline, ~1.8x during bursts
+num_requests: TBD
 
 clients:
   - id: steady-critical
@@ -276,69 +260,13 @@ clients:
     output_distribution: { type: exponential, params: { mean: 256 } }
 ```
 
-#### Workload 3: `diurnal_heterogeneous`
-
-**Tests**: Can the policy adapt across load levels — permissive at trough, selective at peak — while maintaining fairness across 4 tenants?
-
-```yaml
-version: "2"
-seed: 42
-category: language
-aggregate_rate: 500        # peak rate; diurnal modulates this
-num_requests: 30000
-
-cohorts:
-  - id: enterprise-critical
-    tenant_id: tenant-enterprise
-    slo_class: critical
-    population: 1
-    rate_fraction: 0.15
-    streaming: true
-    arrival: { process: poisson }
-    input_distribution: { type: gaussian, params: { mean: 128, std_dev: 32, min: 32, max: 256 } }
-    output_distribution: { type: exponential, params: { mean: 64 } }
-    diurnal: { peak_hour: 14, peak_to_trough_ratio: 2.5 }
-
-  - id: saas-standard
-    tenant_id: tenant-saas
-    slo_class: standard
-    population: 1
-    rate_fraction: 0.30
-    streaming: false
-    arrival: { process: poisson }
-    input_distribution: { type: gaussian, params: { mean: 256, std_dev: 64, min: 64, max: 512 } }
-    output_distribution: { type: exponential, params: { mean: 128 } }
-    diurnal: { peak_hour: 10, peak_to_trough_ratio: 3.0 }
-
-  - id: research-batch
-    tenant_id: tenant-research
-    slo_class: batch
-    population: 1
-    rate_fraction: 0.35
-    streaming: false
-    arrival: { process: gamma, cv: 2.5 }
-    input_distribution: { type: gaussian, params: { mean: 512, std_dev: 128, min: 128, max: 1024 } }
-    output_distribution: { type: exponential, params: { mean: 256 } }
-    diurnal: { peak_hour: 2, peak_to_trough_ratio: 2.0 }
-
-  - id: background-indexing
-    tenant_id: tenant-infra
-    slo_class: background
-    population: 1
-    rate_fraction: 0.20
-    streaming: false
-    arrival: { process: constant }
-    input_distribution: { type: gaussian, params: { mean: 1024, std_dev: 256, min: 256, max: 2048 } }
-    output_distribution: { type: exponential, params: { mean: 512 } }
-```
-
 ### 6. SkyDiscover Config
 
 ```yaml
 # benchmarks/blis_admission/config.yaml
 language: go
 file_suffix: .go
-diff_based_generation: true
+diff_based_generation: false     # MUST be false — true causes ~85% build errors with OpenEvolve
 max_iterations: 50
 checkpoint_interval: 5
 max_solution_length: 40000
@@ -359,19 +287,22 @@ prompt:
   system_message: |
     You are optimizing an admission control policy for a 4-instance LLM inference cluster.
 
-    PROBLEM: Static admission control fails with heterogeneous tenants and dynamic traffic.
-    You can't simultaneously maintain utilization, enforce fairness, and isolate bad actors
-    with fixed thresholds. Your job is to discover an adaptive policy.
+    PROBLEM: Under overload, admitting everything causes queues to explode and critical
+    tenants to be starved. Your job is to selectively reject low-priority requests to
+    protect high-priority ones while maintaining throughput.
 
-    GOAL: Maximize a multi-objective score balancing:
-      - SLO attainment (30%): fraction of requests meeting per-class latency targets
-      - Jain fairness (25%): equal throughput across tenants
-      - Utilization (20%): don't reject too much — maximize completed requests
-      - Critical protection (15%): never reject critical-class requests unnecessarily
-      - Tail latency (10%): keep P95 E2E low for admitted requests
+    GOAL: Maximize a multi-objective score:
+      - SLO attainment (50%): fraction of ALL requests (including rejected) meeting latency targets.
+        Rejected requests count as SLO misses. So rejecting critical hurts a lot.
+      - Throughput (30%): completed / total requests, capped at 85%. Shedding up to 15% of
+        requests is FREE — no throughput penalty. Only aggressive rejection (>15%) is penalized.
+      - Jain fairness (20%): equal completion rates across tenants.
 
-    BASELINE: Admit everything (always-admit). Under overload, queues explode,
-    critical tenants are starved, and tail latency blows up.
+    BASELINE: Admit everything (always-admit). Under overload: SLO attainment ~40%,
+    throughput at cap, fairness ~90%. Score ~0.48. You must beat this.
+
+    STRATEGY HINT: Shed low-priority classes (batch, background) when cluster load is high.
+    This improves SLO attainment (critical meets targets) at zero throughput cost (under cap).
 
     AVAILABLE SIGNALS — from request:
       - inputLen: number of input tokens (cost proxy)
@@ -379,7 +310,7 @@ prompt:
       - tenantID: unique tenant identifier
 
     AVAILABLE SIGNALS — from cluster state:
-      - numInstances: number of instances in the cluster
+      - numInstances: number of instances (4)
       - totalInFlight: sum of InFlightRequests across all instances (FRESH every call)
       - totalQueueDepth: sum of QueueDepth across instances (stale up to 5s)
       - maxKVUtil: highest KVUtilization across instances (stale up to 5s)
@@ -397,6 +328,10 @@ prompt:
 
     Return (true, "") to admit, (false, "reason") to reject.
 
+    KEY INSIGHT from routing experiments: InFlightRequests is the best load signal
+    (fresh, router-local). KVUtilization is useful as a safety filter (>90% = memory pressure).
+    Stale signals (QueueDepth) should not be primary decision factors.
+
     RULES (compilation failures waste an iteration):
     1. Only modify code between EVOLVE-BLOCK-START and EVOLVE-BLOCK-END
     2. Must be valid Go — guard all divisions to avoid divide-by-zero
@@ -404,12 +339,11 @@ prompt:
     4. Use the pre-provisioned state maps — don't add struct fields
     5. All map reads on tenantTokens/tenantRequests/classCounters are safe (pre-initialized)
 
-    EVALUATION: 3 overload workloads with heterogeneous tenants.
-      - overload_mixed_slo: sustained 1.5x overload, 3 SLO tiers
+    EVALUATION: 2 overload workloads with heterogeneous tenants.
+      - overload_mixed_slo: sustained 1.3x overload, 3 SLO tiers (critical/standard/batch)
       - bursty_adversary: 1 steady critical tenant + 1 extremely bursty bulk tenant
-      - diurnal_heterogeneous: 4 tenants with time-varying load patterns
 
-    SLO TARGETS (E2E ms): critical=500, standard=2000, sheddable=5000, batch=10000, background=30000
+    SLO TARGETS (E2E ms): calibrated from pilot data — see evaluator.
 
 search:
   type: "adaevolve"
@@ -422,110 +356,96 @@ evaluator:
   cascade_evaluation: false
 ```
 
-### 7. Running All Frameworks
+### 7. Baselines
 
-Same evaluator, same initial program, same config. Only `--search` changes.
+| Baseline | Description | Expected weakness |
+|----------|-------------|-------------------|
+| `always-admit` | Admit everything | Queues explode under overload, critical starved |
+| `priority-shedding` | Reject in inverse SLO-class order when `totalInFlight > threshold` | No per-tenant fairness; hard threshold = cliff behavior |
+| `token-bucket` | capacity=TBD, refillRate=TBD | Rejects all classes equally; wastes capacity at low load |
 
-| Framework | Flag | Notes |
-|-----------|------|-------|
-| AdaEvolve | `--search adaevolve` | Multi-island, UCB exploration |
-| EvoX | `--search evox` | Co-evolution of solution + search strategy |
-| OpenEvolve | `--search openevolve` | External backend, fuzzy diff matching |
-
-Start with 3 frameworks (the ones proven in the routing study). Add GEPA later if needed.
+`priority-shedding` is the naive version of what evolution should discover. If the evolved policy can't beat it, the search failed.
 
 ### 8. Comparison Metrics
 
-#### 8.1 Quality Metrics (per framework, from best discovered program)
-
-| Metric | Description | Source |
-|--------|-------------|--------|
-| `combined_score` | Multi-objective composite | Primary ranking metric |
-| `slo_attainment` | Fraction meeting SLO targets | Higher = better |
-| `jain_fairness` | Jain index across tenants | Higher = better (1.0 = perfect) |
-| `utilization` | completed / total | Higher = better |
-| `critical_rejection_rate` | % critical requests rejected | Lower = better (0 = ideal) |
-| `avg_e2e_ms` | Mean E2E for admitted requests | Lower = better |
-| `avg_p95_ms` | P95 E2E for admitted requests | Lower = better |
-| Per-workload scores | Score on each of the 3 workloads | Identifies specialization vs generalization |
-
-#### 8.2 Cost Metrics (same as routing study)
-
 | Metric | Description |
 |--------|-------------|
-| Total LLM calls | API call count |
-| Total tokens | Input + output token consumption |
-| Wall-clock time | Experiment duration |
-| Successful evaluations | Programs that compiled + ran |
-| Failed evaluations | Build failures, timeouts |
-| Iterations to best | When the best solution was found |
-
-#### 8.3 Pareto Analysis
-
-Because admission control has a multi-objective fitness, we should also plot the **Pareto frontier** of discovered policies across:
-- Utilization vs SLO attainment
-- Utilization vs Jain fairness
-- SLO attainment vs Jain fairness
-
-This reveals whether different frameworks find different tradeoff points.
-
-### 9. Baselines to Compare Against
-
-In addition to cross-framework comparison, each evolved policy should be compared to these static baselines:
-
-| Baseline | Config | Expected weakness |
-|----------|--------|-------------------|
-| `always-admit` | Default | Queues explode under overload, critical starved |
-| `token-bucket-conservative` | capacity=1000, refillRate=200 | Rejects critical and batch equally; wastes capacity at low load |
-| `token-bucket-aggressive` | capacity=500, refillRate=150 | Better latency but low utilization |
-
-Baseline scores should be computed by the evaluator once and cached (same pattern as routing baseline).
+| `combined_score` | Primary ranking (3-term formula) |
+| `slo_attainment` | Fraction of all requests meeting SLO (rejected = miss) |
+| `throughput` | completed / num_requests |
+| `jain_fairness` | Jain index across tenant completion rates |
+| `avg_e2e_ms` | Mean E2E for admitted requests |
+| `total_rejected` | Absolute rejection count |
+| Per-workload scores | Identifies specialization vs generalization |
+| Iterations to best | Search efficiency |
+| Build error rate | Framework reliability |
 
 ---
 
 ## Implementation Steps
 
-### Phase 1: Setup
+### Phase 0: Capacity Calibration (mandatory, ~20 min)
 
-**No inference-sim changes required.** The factory remapping in the initial program and INV-1 arithmetic in the evaluator eliminate all sim-side changes.
+**Purpose**: Determine actual cluster capacity and set overload rates + SLO targets from measured data.
 
-1. **Create `benchmarks/blis_admission/`** with the directory structure above
-2. **Symlink inference-sim**: `ln -s ../blis_router/inference-sim benchmarks/blis_admission/inference-sim` (shared submodule — the two benchmarks already can't run concurrently since they share a Go build)
-3. **Create initial_program.go**: From `docs/study/admission_initial_program.go`, with `"always-admit"` factory case remapped to `NewAdaptiveAdmission()`
-4. **Create evaluator.py**: Adapt from `blis_router/evaluator.py`:
-   - Change file target: save/restore `sim/admission.go` (not `routing.go`)
-   - Add `--results-path <tmpfile>` to sim command for per-request JSON
-   - Compute `rejected_requests` via INV-1: `num_requests - injected_requests`
-   - Parse per-request JSON to compute `slo_attainment`, `jain_fairness`, `critical_rejection_rate`
-   - Multi-objective scoring formula
-5. **Create workload YAMLs**: The 3 overload scenarios defined above
-6. **Create routing_policy.yaml**: With `admission: { policy: always-admit }`
-7. **Create config.yaml**: With admission-specific system prompt
-8. **Pilot run**: `uv run skydiscover-run ... -s topk -i 2` to verify full pipeline:
-   - Verify Go build succeeds with the initial program
-   - Verify overload workloads produce rejections (check `injected_requests < num_requests` when baseline is evolved)
-   - Verify per-request JSON is written and parseable via `--results-path`
-   - Verify `admission.go` is restored after evaluation
-   - Verify multi-objective score is computed and reasonable
+**Tooling**: Write `benchmarks/blis_admission/scripts/calibrate_capacity.py` (~100 lines). The script:
+- Builds the sim binary once
+- Loops over rates × workloads, running sim with `--results-path` for per-request JSON
+- Parses per-request records, computes **per-class** P50/P75/P90/P95
+- Outputs a clean table and identifies saturation point
+- Writes calibrated values to `calibration.json` for the evaluator to load
 
-### Phase 2: Run Experiments
+1. **Create benchmark skeleton**: directory, initial_program.go, config.yaml, workload YAMLs (with placeholder rates)
+2. **Write `calibrate_capacity.py`** — standalone script that calls the sim binary directly
+3. **Run rate sweep for BOTH workloads**: 20, 40, 60, 80, 100, 120, 160 QPS
+   - 7 rates × 2 workloads × 1 seed = 14 simulation runs (~15 min)
+   - For each run, record: per-class P50/P75/P90/P95 E2E, mean queue depth, injected vs num_requests
+4. **Find saturation point** (per workload): The rate where P95 E2E exceeds 3× the P95 at the lowest rate (structural criterion, independent of SLO targets)
+5. **Set overload rates**: Workload 1 = 1.3x saturation. Workload 2 = 1.1x saturation (gamma bursts push effective rate to ~1.8x)
+6. **Set SLO targets** from **per-class** percentiles at 1.0x capacity:
+   - critical = P75 E2E for critical-class requests at 1.0x
+   - standard = P90 E2E for standard-class requests at 1.0x
+   - sheddable = 2× P90 for sheddable at 1.0x
+   - batch = 5× P90 for batch at 1.0x
+   - background = 10× P90 for batch at 1.0x (very generous)
+7. **Set THROUGHPUT_CAP**: `1 - overload_fraction / (1 + overload_fraction)`, rounded up. For 1.3x overload → ~0.85.
+8. **Verify baseline scores**: Run `always-admit` at overload rate → score should be ~0.4-0.5 (room to improve)
+9. **Verify token-bucket produces rejections**: Run token-bucket at overload → `injected_requests < num_requests`
+10. **Calibrate fitness formula**: Verify all 3 components contribute meaningful variance between `always-admit` and `token-bucket`. Adjust weights if any component is constant.
 
-12. **Run 3 frameworks**: adaevolve, evox, openevolve — sequentially, 50 iterations each
-13. **Monitor progress**: Check logs every 2 minutes (same CLAUDE.md rules as routing)
-14. **Verify isolation after each framework**: `admission.go` restored, no leaked artifacts
+### Phase 1: Setup & Pilot
+
+9. **Finalize workload YAMLs** with calibrated rates from Phase 0
+10. **Finalize SLO targets** in evaluator
+11. **Pilot run**: `uv run skydiscover-run ... -s topk -i 3` to verify:
+    - Go build succeeds with initial program
+    - `--results-path` JSON parseable, per-request records have `slo_class`/`tenant_id`/`e2e_ms`
+    - INV-1 derivation produces correct rejection count
+    - Multi-objective score computed and in expected range
+    - `admission.go` restored after evaluation
+    - Iteration time is reasonable (~30-60s with single-LLM + single-seed + 2 workloads)
+
+### Phase 2: Run Experiment
+
+12. **Start with openevolve** (proven best in routing study): 50 iterations, single-seed, single-LLM
+    - Expected: ~30-40 min total, ~30-60s/iter
+13. **Monitor progress** every 2 minutes (same rules as routing — CLAUDE.md)
+14. **Verify isolation**: `admission.go` restored, no leaked artifacts
+15. **If openevolve succeeds**: Run adaevolve + evox for framework comparison (same config)
 
 ### Phase 3: Analysis
 
-15. **Run comparison scripts**: Adapt from blis_router scripts for multi-objective metrics
-16. **Plot Pareto frontiers**: Utilization vs fairness vs SLO attainment
-17. **Compare to static baselines**: always-admit, token-bucket variants
-18. **Document findings**: Write `analysis.md` in output directory
+16. **Run analysis scripts** (adapted from blis_router)
+17. **Robustness validation**: 3 seeds with best policy
+18. **Write analysis.md** with multi-baseline comparison
+19. **Deployment viability assessment**: Which signals are production-available?
 
-### Phase 4: Optional Extensions
+### Phase 4: Extensions (if Phase 2 succeeds)
 
-19. **Joint evolution**: Evolve admission + routing simultaneously (both EVOLVE-BLOCKs in one file)
-20. **Longer runs**: 100+ iterations for frameworks still improving at 50
-21. **Transfer test**: Apply best routing policy from routing study + best admission policy from this study
+20. **Multi-LLM validation**: Run best policy with `qwen_14b`
+21. **Diurnal workload**: Add `workload_v2_diurnal_heterogeneous.yaml` (4 tenants, time-varying load) — requires validating simulator timing first
+22. **Joint evolution**: Evolve admission + routing simultaneously
+23. **Transfer test**: Best routing policy + best admission policy together
 
 ---
 
@@ -533,23 +453,34 @@ Baseline scores should be computed by the evaluator once and cached (same patter
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Multi-objective score is noisy | Frameworks chase noise instead of real improvement | Use 2 seeds, average scores; tune weights on pilot data |
-| LLM generates policies that reject everything | Score tanks on utilization term | Fitness formula penalizes over-rejection; `always-admit` baseline provides floor |
-| Overload workloads too aggressive | All policies fail equally | Start with 1.3x overload, increase gradually; include calm periods |
-| LLM can't discover stateful strategies | Only finds threshold-based policies | Pre-provisioned state maps lower the barrier; system prompt documents state usage |
-| Workload rates don't actually produce overload (capacity depends on model/hardware) | Nothing to evolve — always-admit wins | Run pilot with always-admit first; verify queue buildup and >0 rejected requests with token-bucket |
-| `JainFairnessIndex` or `SLOAttainment` not in JSON output | Evaluator can't compute score | Use `--results-path` for per-request JSON, compute in Python. Derive `rejected_requests` via INV-1 (`num_requests - injected_requests`). Zero sim changes. |
+| Overload rates wrong | Degenerate optimization | **Phase 0 calibration** (mandatory) |
+| SLO targets unrealistic | slo_attainment = constant | **Phase 0 calibration** from real measurements |
+| LLM generates reject-everything | Score = 0 | Formula strongly penalizes (throughput=0, slo_attainment=0) |
+| LLM can't discover stateful strategies | Only finds threshold policies | Pre-provisioned state maps + system prompt examples |
+| Multi-objective score noisy | Frameworks chase noise | Start single-seed; add seeds in robustness phase |
+| Build errors with diff parsing | Wasted iterations | `diff_based_generation: false` (proven fix) |
 
 ---
 
 ## Resolved Questions
 
-1. **Fitness weights**: Start with 30/25/20/15/10. Calibrate during pilot (Phase 1, step 11) by checking that all components contribute meaningfully to score variance across `always-admit` vs `token-bucket` baselines. Adjust if any component is constant.
-2. **Overload intensity**: Pilot run (step 11) with `always-admit` will reveal the actual saturation point. If 450 req/s doesn't produce queue buildup, increase. If queues grow unbounded, decrease. Target: 30-50% of requests experience SLO violations under `always-admit`.
-3. **Sim changes required**: None. The factory remapping trick (remap `"always-admit"` → `NewAdaptiveAdmission()` in the replaced `admission.go`) avoids needing a new policy name. `rejected_requests` is derived via INV-1 (`num_requests - injected_requests`) in Python. SLO attainment and Jain fairness are computed from `--results-path` per-request JSON.
-4. **Shared submodule**: Use symlink (`ln -s ../blis_router/inference-sim`). No sim changes needed, so the routing benchmark is completely unaffected. Both benchmarks already can't run concurrently (shared Go build directory).
+1. **Fitness formula**: 3 terms (slo_attainment 50%, capped_throughput 30%, fairness 20%). Rejected = SLO miss. Throughput capped at 0.85 to eliminate penalty for moderate shedding. Simpler than original 5-term proposal — clearer gradient, no degenerate strategies.
+2. **Overload intensity**: Calibrated in Phase 0, not guessed.
+3. **SLO targets**: Calibrated from Phase 0 pilot at 1.0x capacity, not from intuition.
+4. **Sim changes**: None. Factory remapping + INV-1 + `--results-path` per-request JSON.
+5. **Shared submodule**: Symlink `ln -s ../blis_router/inference-sim`.
+6. **diff_based_generation**: `false` (routing proved ~85% build errors with `true`).
+7. **MULTI_LLM default**: Off (single qwen_7b) for search. Multi-LLM is a validation pass.
+8. **Jain fairness N**: `N = total tenants in workload spec`, not tenants with completions.
+9. **Diurnal workload**: Deferred to Phase 4 — simulator supports it (CohortSpec + diurnalWindows), but 24-hour simulated horizon timing is unvalidated. Start with 2 simpler workloads.
+10. **`num_requests` for INV-1**: Evaluator must parse workload YAML to get this (not in `--results-path` JSON). Guard: `assert num_requests > 0`.
+11. **Throughput cap**: Set at 0.85 (calibrated from 1.3x overload fraction). Eliminates shallow gradient problem where `always-admit` throughput=1.0 punishes any rejection. Smart shedding now scores 0.81 vs always-admit 0.48 (wide gap = strong search signal).
+12. **Phase 0 calibration script**: `calibrate_capacity.py` sweeps both workloads at 7 rate points (20-160 QPS), computes per-class percentiles, outputs calibration.json. ~100 lines of Python, ~20 min runtime.
+13. **Saturation criterion**: P95 E2E exceeds 3x the P95 at lowest rate (structural, independent of SLO targets).
+14. **`slo_class` omitempty**: `RequestMetrics.SLOClass` uses `omitempty` JSON tag. Evaluator must handle missing field (default to "standard").
+15. **Binary name**: `simulation_worker` (matching routing evaluator's `-o` flag), not `blis`.
 
 ## Open Questions
 
-1. **Per-class rejection tracking**: The `critical_rejection_rate` proxy (`1 - completed_critical / expected_critical`) conflates rejection with in-progress requests at simulation end. If this proves noisy, consider adding per-SLO-class rejection counters to the sim as a Phase 2 enhancement.
-2. **Diurnal workload simulation time**: With `CohortSpec` diurnal modulation creating 24 one-hour lifecycle windows, the simulation horizon may be very long. Need to verify during pilot that diurnal workload completes in reasonable time (~120s). If too slow, reduce to a 6-hour simulated window or use only workloads 1 and 2 initially.
+1. **Per-class rejection tracking**: The evaluator treats rejected requests as SLO misses but can't distinguish "rejected critical" from "rejected batch" without per-class counters in the sim. The `slo_attainment` formula handles this implicitly (rejected = miss regardless of class), but if we need per-class rejection analytics, we'd need a minor sim change (add `rejected_requests` to `MetricsOutput`). Not blocking — the score formula works without it.
+2. **Hopeless admits**: Under extreme overload, admitting a request that will definitely miss its SLO is strictly better than rejecting it (throughput credit, same slo_attainment). This incentivizes admitting hopeless requests. The externality (queue congestion hurts other requests) is captured indirectly but weakly. If this proves problematic, consider a queue-depth penalty term. Monitor during Phase 2.
