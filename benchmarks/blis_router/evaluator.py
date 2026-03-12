@@ -5,7 +5,7 @@ Evaluates evolved routing algorithms by:
 1. Extracting Go code from Python wrapper
 2. Writing evolved routing.go to BLIS source (restored after evaluation)
 3. Building BLIS
-4. Running simulations on N seeds × N LLMs × 3 workloads (default: 2 seeds × 2 LLMs × 3 = 12 sims)
+4. Running simulations on N seeds × N LLMs × 2 workloads (default: 2 seeds × 2 LLMs × 2 = 8 sims)
 5. Computing score based on baseline-normalized per-workload ratios
 
 Score = mean(1 - candidate/baseline) × 100  (percentage improvement over baseline)

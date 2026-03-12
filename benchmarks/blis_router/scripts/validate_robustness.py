@@ -35,7 +35,7 @@ INITIAL_PROGRAM = (
     if (SCRIPT_DIR / "initial_program.go").exists()
     else SCRIPT_DIR / "initial_program.py"
 )
-WORKLOADS = ["cache_warmup", "load_spikes", "multiturn"]
+WORKLOADS = ["glia_40qps", "prefix_heavy"]
 
 
 def _find_best_program(fw_dir: Path) -> Path | None:
@@ -217,24 +217,26 @@ def print_tables(all_results: dict, seeds: list[str], results_dir: Path):
             row += f"{_mean(scores):>14.2f}{_stddev(scores):>12.2f}"
             print(row)
 
-        # --- Table 2: % improvement vs per-seed baseline ---
-        print(f"\n% Improvement vs per-seed baseline:")
+        # --- Table 2: Score difference vs per-seed baseline ---
+        # Both scores are already percentage improvements from the evaluator
+        # (baseline ≈ 0%, evolved = +X%), so the difference IS the improvement.
+        print(f"\nScore Difference vs per-seed baseline (pp):")
         print(f"{'Framework':<22}{seed_cols}{'Mean':>14}{'StdDev':>12}")
         print("-" * (22 + 14 * len(seeds) + 26))
 
         for fw in frameworks:
-            pcts = []
+            diffs = []
             row = f"{fw:<22}"
             for i, seed in enumerate(seeds):
                 fw_score = fw_data[fw][seed].get("combined_score", -100000.0)
                 bl_score = bl_scores[i]
-                if bl_score != 0 and bl_score != -100000.0:
-                    pct = (fw_score - bl_score) / abs(bl_score) * 100
+                if fw_score != -100000.0 and bl_score != -100000.0:
+                    diff = fw_score - bl_score
                 else:
-                    pct = 0.0
-                pcts.append(pct)
-                row += f"{pct:>+13.1f}%"
-            row += f"{_mean(pcts):>+13.1f}%{_stddev(pcts):>11.1f}%"
+                    diff = 0.0
+                diffs.append(diff)
+                row += f"{diff:>+13.1f}%"
+            row += f"{_mean(diffs):>+13.1f}%{_stddev(diffs):>11.1f}%"
             print(row)
 
         # --- Table 3: Per-workload E2E (mean across seeds) ---

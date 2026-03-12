@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-DEFAULT_WORKLOADS = ["cache_warmup", "load_spikes", "multiturn"]
+DEFAULT_WORKLOADS = ["glia_40qps", "prefix_heavy"]
 GLIA_WORKLOADS = ["glia_40qps", "prefix_heavy"]
 WORKLOADS = DEFAULT_WORKLOADS  # overridden by detect_workloads() in main()
 
@@ -128,11 +128,10 @@ def main():
             continue
         metrics = result.get("metrics", result)
         score = metrics.get("combined_score")
-        pct = ""
-        if baseline and isinstance(score, (int, float)):
-            bl_score = baseline.get("combined_score", 0)
-            if bl_score != 0:
-                pct = f"{(score - bl_score) / abs(bl_score) * 100:+.1f}%"
+        # The evaluator's combined_score for evolved programs is already a percentage
+        # improvement vs baseline (0% = same as baseline, +X% = better).
+        # Display it directly as the "% vs BL" column.
+        pct = f"{score:+.1f}%" if isinstance(score, (int, float)) else ""
         print(f"{fw:<20} {_fmt(score):>12} {_fmt(metrics.get('avg_e2e_ms')):>10} "
               f"{_fmt(metrics.get('avg_p95_ms')):>10} {pct:>10} {str(result.get('iteration', 'N/A')):>6}")
 

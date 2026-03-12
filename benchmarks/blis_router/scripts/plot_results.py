@@ -25,7 +25,7 @@ except ImportError:
     print("matplotlib is required: pip install matplotlib")
     sys.exit(1)
 
-DEFAULT_WORKLOADS = ["cache_warmup", "load_spikes", "multiturn"]
+DEFAULT_WORKLOADS = ["glia_40qps", "prefix_heavy"]
 GLIA_WORKLOADS = ["glia_40qps", "prefix_heavy"]
 WORKLOADS = DEFAULT_WORKLOADS  # overridden by detect_workloads() in main()
 BASELINE_COLOR = "#999999"

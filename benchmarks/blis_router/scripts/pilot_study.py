@@ -9,8 +9,8 @@ Tests:
   1. Go code extraction from initial_program.go
   2. EVOLVE-BLOCK marker detection
   3. Go build with extracted code
-  4. Full evaluation (3 workloads) with baseline program
-  5. Score sanity checks (finite, negative, all workloads succeed)
+  4. Full evaluation (2 workloads) with baseline program
+  5. Score sanity checks (finite, near-zero for baseline, all workloads succeed)
   6. Experiment isolation (routing.go restored, no artifacts in benchmark dir)
 
 Usage:
@@ -132,17 +132,19 @@ def test_full_evaluation():
         check(error is None, f"No error (got: {error})")
         check(isinstance(score, (int, float)), f"Score is numeric: {score}")
         check(score != float("-inf") and score != float("inf"), "Score is finite")
-        check(score < 0, f"Score is negative (latency-based): {score:.2f}")
+        # Evaluator returns percentage improvement vs baseline.
+        # Baseline evaluating itself should produce score ~0% (within noise).
+        check(abs(score) < 5, f"Score is near-zero for baseline self-eval (got {score:.2f}%, expect ~0%)")
         check(score > -100000, f"Score is not error sentinel: {score:.2f}")
 
         print("\n--- Test 5: Score Sanity ---")
-        check(success_rate == 1.0, f"All 3 workloads succeeded (rate={success_rate})")
+        check(success_rate == 1.0, f"All 2 workloads succeeded (rate={success_rate})")
         check(isinstance(avg_e2e, (int, float)) and avg_e2e > 0, f"Avg E2E positive: {avg_e2e:.2f}ms")
         check(isinstance(avg_p95, (int, float)) and avg_p95 > 0, f"Avg P95 positive: {avg_p95:.2f}ms")
         check(avg_p95 >= avg_e2e, f"P95 >= mean (tail >= avg): {avg_p95:.2f} >= {avg_e2e:.2f}")
 
         # Check per-workload results
-        for wl in ["cache_warmup", "load_spikes", "multiturn"]:
+        for wl in ["glia_40qps", "prefix_heavy"]:
             wl_e2e = result.get(f"{wl}_e2e_ms")
             check(wl_e2e is not None and wl_e2e > 0, f"{wl} e2e_ms: {wl_e2e:.2f}ms")
 

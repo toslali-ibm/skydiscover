@@ -354,12 +354,20 @@ def print_combined_score_table(title: str, all_results: dict, model_filter: list
             else:
                 row += f" | {'ERR':>10} {'N/A':>7}"
 
-        # Overall: average across workloads
+        # Overall: average of per-workload % improvements (so each workload
+        # contributes equally, matching the evaluator's scoring approach)
         if cfg_scores and llq_scores and len(cfg_scores) == len(llq_scores):
-            overall = sum(cfg_scores) / len(cfg_scores)
-            llq_overall = sum(llq_scores) / len(llq_scores)
-            gain = pct_gain(llq_overall, overall)
-            row += f" | {overall:>10.1f} {gain:>7}"
+            per_wl_gains = []
+            for cs, ls in zip(cfg_scores, llq_scores):
+                if ls > 0:
+                    per_wl_gains.append((ls - cs) / abs(ls) * 100)
+            if per_wl_gains:
+                avg_gain = sum(per_wl_gains) / len(per_wl_gains)
+                gain_str = f"+{avg_gain:.1f}%" if avg_gain >= 0 else f"{avg_gain:.1f}%"
+            else:
+                gain_str = "N/A"
+            avg_score = sum(cfg_scores) / len(cfg_scores)
+            row += f" | {avg_score:>10.1f} {gain_str:>7}"
         else:
             row += f" | {'N/A':>10} {'N/A':>7}"
 

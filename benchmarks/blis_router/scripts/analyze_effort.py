@@ -382,8 +382,6 @@ def analyze_framework(fw_dir: Path) -> dict:
 
 
 def print_effort_table(analyses: list[dict], baseline: dict | None):
-    baseline_score = baseline["combined_score"] if baseline else None
-
     print(f"\n{'Framework':<18} {'Iters':>6} {'Wall(m)':>8} {'Avg(s)':>7} {'Med(s)':>7} "
           f"{'Pop':>5} {'Uniq':>5} {'MaxGen':>7} {'BestIter':>9} {'Score':>10} {'Improv%':>8}")
     print("-" * 110)
@@ -400,9 +398,10 @@ def print_effort_table(analyses: list[dict], baseline: dict | None):
         best_it = a.get("best_iteration", "?")
         score = a.get("best_score")
         score_s = f"{score:.1f}" if score is not None else "?"
-        if baseline_score and score is not None:
-            pct = (score - baseline_score) / abs(baseline_score) * 100
-            improv = f"{pct:+.1f}%"
+        # The evaluator's combined_score is already a percentage improvement
+        # vs baseline (0% = same, +X% = better). Display it directly.
+        if score is not None:
+            improv = f"{score:+.1f}%"
         else:
             improv = "?"
         print(f"{fw:<18} {str(iters):>6} {wall_m:>8} {avg_s:>7} {med_s:>7} "
@@ -514,9 +513,9 @@ def plot_convergence_curves(analyses: list[dict], baseline: dict | None, out_dir
     """Line plot: best score over iterations for each framework."""
     fig, ax = plt.subplots(figsize=(9, 5.5))
 
-    if baseline:
-        ax.axhline(y=baseline["combined_score"], color="#999999", linestyle="--",
-                    linewidth=1.5, label="baseline", zorder=1)
+    # Baseline is at 0% improvement (the evaluator's score IS % improvement vs baseline)
+    ax.axhline(y=0, color="#999999", linestyle="--",
+                linewidth=1.5, label="baseline (0%)", zorder=1)
 
     for a in analyses:
         traj = a.get("score_trajectory")
@@ -566,10 +565,6 @@ def plot_effort_vs_improvement(analyses: list[dict], baseline: dict | None, out_
     Each point shows total wall time (x) vs final improvement (y).
     Annotated with best iteration and time-to-best for context.
     """
-    if not baseline:
-        return
-
-    baseline_score = baseline["combined_score"]
     fig, ax = plt.subplots(figsize=(9, 5.5))
 
     for a in analyses:
@@ -577,7 +572,9 @@ def plot_effort_vs_improvement(analyses: list[dict], baseline: dict | None, out_
         wall = a.get("total_wall_time_s")
         if score is None or wall is None:
             continue
-        pct_improv = (score - baseline_score) / abs(baseline_score) * 100
+        # The evaluator's combined_score is already a percentage improvement
+        # vs baseline (0% = same, +X% = better). Use it directly.
+        pct_improv = score
         pop = a.get("final_population_size", 10)
         size = max(40, min(300, pop * 8))
 
@@ -622,10 +619,6 @@ def plot_efficiency_bar(analyses: list[dict], baseline: dict | None, out_dir: Pa
     - Total: % improvement / total wall time (given fixed iteration budget)
     - Time-to-best: % improvement / time until best was found (convergence speed)
     """
-    if not baseline:
-        return
-
-    baseline_score = baseline["combined_score"]
     names = []
     eff_total = []
     eff_ttb = []
@@ -636,7 +629,8 @@ def plot_efficiency_bar(analyses: list[dict], baseline: dict | None, out_dir: Pa
         ttb = _time_to_best(a)
         if score is None or wall is None or wall == 0:
             continue
-        pct_improv = (score - baseline_score) / abs(baseline_score) * 100
+        # The evaluator's combined_score is already a percentage improvement.
+        pct_improv = score
         names.append(a["framework"])
         eff_total.append(pct_improv / (wall / 60))
         eff_ttb.append(pct_improv / (ttb / 60) if ttb and ttb > 0 else 0)
