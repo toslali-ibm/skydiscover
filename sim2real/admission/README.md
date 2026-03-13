@@ -239,6 +239,40 @@ The evolved thresholds (12, 20, 25, 35) were discovered under simulation with sp
 2. **Scale overload**: Generate 2x your saturation rate
 3. **Tune thresholds if needed**: The load-per-instance thresholds may need adjustment based on real vLLM batching behavior. Start with the discovered values and adjust based on observed SLO attainment.
 
+## Running the reproduction script
+
+A standalone simulation repro script is provided at `repro/blis_admission_repro.py`.
+It runs always-admit (baseline) and the evolved best program against both overload workloads and prints a multi-objective comparison table.
+
+```bash
+cd sim2real/admission   # or wherever this folder lives
+
+# Install deps if needed
+pip install pyyaml   # (or: uv sync from repo root)
+
+# Clone inference-sim at the pinned commit (one-time)
+git clone https://github.com/inference-sim/inference-sim.git inference-sim
+git -C inference-sim checkout 7fd7a88d5d5005b15b142fa8e70cf5d8537ceebe
+
+# Run repro (default: seed 42, 4 instances)
+python repro.py
+
+# Custom seeds
+python repro.py --seeds 42,456 --num-instances 4
+```
+
+Expected output:
+```
+BLIS Admission Control Repro  —  model: qwen/qwen2.5-7b-instruct  |  seeds: 42
+Scoring: 0.5*SLO_attainment + 0.3*capped_throughput + 0.2*Jain_fairness  |  throughput_cap=0.5
+================================================================================
+Program                 Combined   SLO attn   Throughput   Fairness     Avg E2E     vs base
+Always-admit (base)  *   0.6240    30.0%       100.0%      100.0%    9083 ms   (control)
+Evolved (best)           0.8520    87.2%       100.0%       57.9%     949 ms     +36.5%
+```
+
+SLO attainment is class-weighted and shed-tolerant: rejected `batch`/`sheddable` requests are excluded from the denominator (shedding them is the correct behavior). Throughput is capped at 50% to reward moderate shedding equally with over-admission.
+
 ## Experiment config (for reproducibility)
 
 | Parameter | Value |

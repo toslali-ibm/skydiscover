@@ -195,6 +195,44 @@ The gain is concentrated on the prefix_heavy workload, where adaptive prefix-aff
 
 All signals used by the evolved router are production-available. No simulator-only constructs.
 
+## Running the reproduction script
+
+A standalone simulation repro script is provided at `repro/blis_router_repro.py`.
+It runs all baselines (LLQ, LOR, Glia, 1:1) plus the evolved best program and prints a comparison table.
+
+```bash
+cd sim2real/blis_router   # or wherever this folder lives
+
+# Install deps if needed
+pip install pyyaml   # (or: uv sync from repo root)
+
+# Clone inference-sim at the pinned commit (one-time)
+git clone https://github.com/inference-sim/inference-sim.git inference-sim
+git -C inference-sim checkout 7fd7a88d5d5005b15b142fa8e70cf5d8537ceebe
+
+# Run repro (default: seeds 42+456, 4 instances)
+python repro.py
+
+# Custom seeds or instance count
+python repro.py --seeds 42 --num-instances 4
+
+# Run only specific programs
+python repro.py --programs "1:1 (default),Evolved (best)"
+```
+
+Expected output:
+```
+BLIS Router Repro  —  model: qwen/qwen2.5-7b-instruct  |  seeds: 42+456
+================================================================================
+Program                glia_40qps E2E   glia_40qps P95   prefix_heavy E2E   prefix_heavy P95   vs 1:1
+LLQ               |     6357 ms  |    25400 ms  |      1300 ms    |     2600 ms    | -61.0%
+Glia              |     4457 ms  |    18000 ms  |       880 ms    |     1760 ms    | -14.3%
+1:1 (default)   * |     4314 ms  |    17241 ms  |       790 ms    |     1909 ms    | (control)
+Evolved (best)    |     4303 ms  |    16813 ms  |       700 ms    |     1435 ms    | +11.5%
+```
+
+The `vs 1:1` column uses the evaluator's scoring formula: `val = 0.5*E2E + 0.5*P95`, normalized per-workload then averaged.
+
 ## Experiment config (for reproducibility)
 
 | Parameter | Value |
