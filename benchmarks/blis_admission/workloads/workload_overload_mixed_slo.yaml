@@ -1,14 +1,14 @@
-# Overload Mixed SLO: sustained 1.3x overload with 3 SLO tiers.
+# Overload Mixed SLO: sustained overload with 4 SLO tiers, 4 tenants.
 # Tests: Can the policy shed batch to protect critical under sustained overload?
 #
 # aggregate_rate is set by calibrate_capacity.py (Phase 0).
-# Placeholder: 80 QPS (~1.3x estimated capacity for these token sizes).
+# Placeholder: 320 QPS (~2x estimated capacity for these token sizes).
 
 version: "1"
 seed: 42
 category: language
-aggregate_rate: 208
-num_requests: 12480     # 60s at 208 req/s (1.3x calibrated saturation)
+aggregate_rate: 320
+num_requests: 19200     # 60s at 320 req/s (2.0x calibrated saturation)
 
 clients:
   - id: realtime-api
@@ -33,7 +33,26 @@ clients:
   - id: standard-service
     tenant_id: tenant-std
     slo_class: standard
-    rate_fraction: 0.40
+    rate_fraction: 0.30
+    streaming: false
+    arrival:
+      process: poisson
+    input_distribution:
+      type: gaussian
+      params:
+        mean: 256
+        std_dev: 64
+        min: 64
+        max: 512
+    output_distribution:
+      type: exponential
+      params:
+        mean: 128
+
+  - id: sheddable-service
+    tenant_id: tenant-shed
+    slo_class: sheddable
+    rate_fraction: 0.20
     streaming: false
     arrival:
       process: poisson
@@ -52,7 +71,7 @@ clients:
   - id: batch-pipeline
     tenant_id: tenant-batch
     slo_class: batch
-    rate_fraction: 0.40
+    rate_fraction: 0.30
     streaming: false
     arrival:
       process: poisson

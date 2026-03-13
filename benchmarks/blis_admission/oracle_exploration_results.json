@@ -1,0 +1,1382 @@
+{
+  "1.3x_always-admit": {
+    "overload_factor": 1.3,
+    "rate": 208,
+    "throughput_cap": 0.769,
+    "policy": "always-admit",
+    "avg_score": 0.8775558836625192,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.9258340544119554,
+        "slo_attainment": 0.8516826923076923,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999635412905462,
+        "completed": 12480,
+        "num_requests": 12480,
+        "rejected": 0,
+        "per_class_slo": {
+          "batch": 0.9997998799279568,
+          "critical": 0.7126669364629704,
+          "standard": 0.7725458898643256
+        },
+        "per_class_p95": {
+          "batch": 11692.339399999999,
+          "critical": 3015.218,
+          "standard": 5837.7831
+        },
+        "raw_throughput": 1.0
+      },
+      "bursty_adversary": {
+        "score": 0.8292777129130832,
+        "slo_attainment": 0.6586538461538461,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9997539491808003,
+        "completed": 12480,
+        "num_requests": 12480,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.14151534126487164,
+          "sheddable": 0.8365281068274822
+        },
+        "per_class_p95": {
+          "critical": 10724.7498,
+          "sheddable": 23269.52
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "1.3x_shed-batch-always": {
+    "overload_factor": 1.3,
+    "rate": 208,
+    "throughput_cap": 0.769,
+    "policy": "shed-batch-always",
+    "avg_score": 0.7358793807539179,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6424810485947527,
+        "slo_attainment": 0.5504807692307693,
+        "capped_throughput": 0.779713080590844,
+        "jain_fairness": 0.6666336990105747,
+        "completed": 7483,
+        "num_requests": 12480,
+        "rejected": 4997,
+        "per_class_slo": {
+          "critical": 0.8895184135977338,
+          "standard": 0.9321628092577813
+        },
+        "per_class_p95": {
+          "critical": 1725.875,
+          "standard": 3372.70225
+        },
+        "raw_throughput": 0.599599358974359
+      },
+      "bursty_adversary": {
+        "score": 0.8292777129130832,
+        "slo_attainment": 0.6586538461538461,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9997539491808003,
+        "completed": 12480,
+        "num_requests": 12480,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.14151534126487164,
+          "sheddable": 0.8365281068274822
+        },
+        "per_class_p95": {
+          "critical": 10724.7498,
+          "sheddable": 23269.52
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "1.3x_shed-batch-sheddable-always": {
+    "overload_factor": 1.3,
+    "rate": 208,
+    "throughput_cap": 0.769,
+    "policy": "shed-batch-sheddable-always",
+    "avg_score": 0.48007601348579954,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6424810485947527,
+        "slo_attainment": 0.5504807692307693,
+        "capped_throughput": 0.779713080590844,
+        "jain_fairness": 0.6666336990105747,
+        "completed": 7483,
+        "num_requests": 12480,
+        "rejected": 4997,
+        "per_class_slo": {
+          "critical": 0.8895184135977338,
+          "standard": 0.9321628092577813
+        },
+        "per_class_p95": {
+          "critical": 1725.875,
+          "standard": 3372.70225
+        },
+        "raw_throughput": 0.599599358974359
+      },
+      "bursty_adversary": {
+        "score": 0.3176709783768464,
+        "slo_attainment": 0.23565705128205128,
+        "capped_throughput": 0.33280817578606914,
+        "jain_fairness": 0.5,
+        "completed": 3194,
+        "num_requests": 12480,
+        "rejected": 9286,
+        "per_class_slo": {
+          "critical": 0.9207889793362555
+        },
+        "per_class_p95": {
+          "critical": 1467.0665999999999
+        },
+        "raw_throughput": 0.25592948717948716
+      }
+    }
+  },
+  "1.3x_shed-batch-on-load": {
+    "overload_factor": 1.3,
+    "rate": 208,
+    "throughput_cap": 0.769,
+    "policy": "shed-batch-on-load",
+    "avg_score": 0.7382435961284783,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6472094793438736,
+        "slo_attainment": 0.5544871794871795,
+        "capped_throughput": 0.7846103831149345,
+        "jain_fairness": 0.6729138733290172,
+        "completed": 7530,
+        "num_requests": 12480,
+        "rejected": 4950,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8883043302306758,
+          "standard": 0.9333599361532322
+        },
+        "per_class_p95": {
+          "batch": 7363.088499999995,
+          "critical": 1721.3035,
+          "standard": 3376.8192999999974
+        },
+        "raw_throughput": 0.6033653846153846
+      },
+      "bursty_adversary": {
+        "score": 0.8292777129130832,
+        "slo_attainment": 0.6586538461538461,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9997539491808003,
+        "completed": 12480,
+        "num_requests": 12480,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.14151534126487164,
+          "sheddable": 0.8365281068274822
+        },
+        "per_class_p95": {
+          "critical": 10724.7498,
+          "sheddable": 23269.52
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "1.3x_shed-low-priority-on-load": {
+    "overload_factor": 1.3,
+    "rate": 208,
+    "throughput_cap": 0.769,
+    "policy": "shed-low-priority-on-load",
+    "avg_score": 0.5894107395954318,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6472094793438736,
+        "slo_attainment": 0.5544871794871795,
+        "capped_throughput": 0.7846103831149345,
+        "jain_fairness": 0.6729138733290172,
+        "completed": 7530,
+        "num_requests": 12480,
+        "rejected": 4950,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8883043302306758,
+          "standard": 0.9333599361532322
+        },
+        "per_class_p95": {
+          "batch": 7363.088499999995,
+          "critical": 1721.3035,
+          "standard": 3376.8192999999974
+        },
+        "raw_throughput": 0.6033653846153846
+      },
+      "bursty_adversary": {
+        "score": 0.5316119998469898,
+        "slo_attainment": 0.4169871794871795,
+        "capped_throughput": 0.5852797505918442,
+        "jain_fairness": 0.7376724246292339,
+        "completed": 5617,
+        "num_requests": 12480,
+        "rejected": 6863,
+        "per_class_slo": {
+          "critical": 0.8713212273011898,
+          "sheddable": 0.9991745769706974
+        },
+        "per_class_p95": {
+          "critical": 1865.73705,
+          "sheddable": 7079.152700000001
+        },
+        "raw_throughput": 0.4500801282051282
+      }
+    }
+  },
+  "1.3x_class-priority-cascade": {
+    "overload_factor": 1.3,
+    "rate": 208,
+    "throughput_cap": 0.769,
+    "policy": "class-priority-cascade",
+    "avg_score": 0.6014317212059348,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6464655966866698,
+        "slo_attainment": 0.553926282051282,
+        "capped_throughput": 0.7837767997065785,
+        "jain_fairness": 0.6718470787452762,
+        "completed": 7522,
+        "num_requests": 12480,
+        "rejected": 4958,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8891137191420477,
+          "standard": 0.9331604150039904
+        },
+        "per_class_p95": {
+          "batch": 5337.048100000004,
+          "critical": 1721.7930000000001,
+          "standard": 3359.3567
+        },
+        "raw_throughput": 0.6027243589743589
+      },
+      "bursty_adversary": {
+        "score": 0.5563978457251999,
+        "slo_attainment": 0.43798076923076923,
+        "capped_throughput": 0.6162265346270548,
+        "jain_fairness": 0.7626975036084945,
+        "completed": 5914,
+        "num_requests": 12480,
+        "rejected": 6566,
+        "per_class_slo": {
+          "critical": 0.8606762680025047,
+          "sheddable": 0.9988970588235294
+        },
+        "per_class_p95": {
+          "critical": 1929.26075,
+          "sheddable": 7658.566749999998
+        },
+        "raw_throughput": 0.4738782051282051
+      }
+    }
+  },
+  "1.5x_always-admit": {
+    "overload_factor": 1.5,
+    "rate": 240,
+    "throughput_cap": 0.667,
+    "policy": "always-admit",
+    "avg_score": 0.8116189882025853,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.9045335911319881,
+        "slo_attainment": 0.8090972222222222,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999249001043847,
+        "completed": 14400,
+        "num_requests": 14400,
+        "rejected": 0,
+        "per_class_slo": {
+          "batch": 0.9986048133937914,
+          "critical": 0.6412776412776413,
+          "standard": 0.7044868488911811
+        },
+        "per_class_p95": {
+          "batch": 14202.070199999991,
+          "critical": 3708.7203999999992,
+          "standard": 7077.118199999998
+        },
+        "raw_throughput": 1.0
+      },
+      "bursty_adversary": {
+        "score": 0.7187043852731825,
+        "slo_attainment": 0.43743055555555554,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999455374770236,
+        "completed": 14400,
+        "num_requests": 14400,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.07554945054945054,
+          "sheddable": 0.5598513011152416
+        },
+        "per_class_p95": {
+          "critical": 19886.837600000003,
+          "sheddable": 29666.323949999998
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "1.5x_shed-batch-always": {
+    "overload_factor": 1.5,
+    "rate": 240,
+    "throughput_cap": 0.667,
+    "policy": "shed-batch-always",
+    "avg_score": 0.6981211541920412,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6775379231109,
+        "slo_attainment": 0.5470833333333334,
+        "capped_throughput": 0.9022572047309678,
+        "jain_fairness": 0.6665954751247146,
+        "completed": 8666,
+        "num_requests": 14400,
+        "rejected": 5734,
+        "per_class_slo": {
+          "critical": 0.8782028782028782,
+          "standard": 0.924187725631769
+        },
+        "per_class_p95": {
+          "critical": 1807.1351999999995,
+          "standard": 3509.771
+        },
+        "raw_throughput": 0.6018055555555556
+      },
+      "bursty_adversary": {
+        "score": 0.7187043852731825,
+        "slo_attainment": 0.43743055555555554,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999455374770236,
+        "completed": 14400,
+        "num_requests": 14400,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.07554945054945054,
+          "sheddable": 0.5598513011152416
+        },
+        "per_class_p95": {
+          "critical": 19886.837600000003,
+          "sheddable": 29666.323949999998
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "1.5x_shed-batch-sheddable-always": {
+    "overload_factor": 1.5,
+    "rate": 240,
+    "throughput_cap": 0.667,
+    "policy": "shed-batch-sheddable-always",
+    "avg_score": 0.5038967882670942,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6775379231109,
+        "slo_attainment": 0.5470833333333334,
+        "capped_throughput": 0.9022572047309678,
+        "jain_fairness": 0.6665954751247146,
+        "completed": 8666,
+        "num_requests": 14400,
+        "rejected": 5734,
+        "per_class_slo": {
+          "critical": 0.8782028782028782,
+          "standard": 0.924187725631769
+        },
+        "per_class_p95": {
+          "critical": 1807.1351999999995,
+          "standard": 3509.771
+        },
+        "raw_throughput": 0.6018055555555556
+      },
+      "bursty_adversary": {
+        "score": 0.33025565342328833,
+        "slo_attainment": 0.233125,
+        "capped_throughput": 0.3789771780776278,
+        "jain_fairness": 0.5,
+        "completed": 3640,
+        "num_requests": 14400,
+        "rejected": 10760,
+        "per_class_slo": {
+          "critical": 0.9222527472527473
+        },
+        "per_class_p95": {
+          "critical": 1463.7111499999996
+        },
+        "raw_throughput": 0.25277777777777777
+      }
+    }
+  },
+  "1.5x_shed-batch-on-load": {
+    "overload_factor": 1.5,
+    "rate": 240,
+    "throughput_cap": 0.667,
+    "policy": "shed-batch-on-load",
+    "avg_score": 0.7001968044865594,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6816892236999362,
+        "slo_attainment": 0.5502777777777778,
+        "capped_throughput": 0.9071505913709811,
+        "jain_fairness": 0.6720257869987651,
+        "completed": 8713,
+        "num_requests": 14400,
+        "rejected": 5687,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8782028782028782,
+          "standard": 0.9240158157125666
+        },
+        "per_class_p95": {
+          "batch": 7687.482799999995,
+          "critical": 1796.3482,
+          "standard": 3509.7146
+        },
+        "raw_throughput": 0.6050694444444444
+      },
+      "bursty_adversary": {
+        "score": 0.7187043852731825,
+        "slo_attainment": 0.43743055555555554,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999455374770236,
+        "completed": 14400,
+        "num_requests": 14400,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.07554945054945054,
+          "sheddable": 0.5598513011152416
+        },
+        "per_class_p95": {
+          "critical": 19886.837600000003,
+          "sheddable": 29666.323949999998
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "1.5x_shed-low-priority-on-load": {
+    "overload_factor": 1.5,
+    "rate": 240,
+    "throughput_cap": 0.667,
+    "policy": "shed-low-priority-on-load",
+    "avg_score": 0.5969496785873518,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6816892236999362,
+        "slo_attainment": 0.5502777777777778,
+        "capped_throughput": 0.9071505913709811,
+        "jain_fairness": 0.6720257869987651,
+        "completed": 8713,
+        "num_requests": 14400,
+        "rejected": 5687,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8782028782028782,
+          "standard": 0.9240158157125666
+        },
+        "per_class_p95": {
+          "batch": 7687.482799999995,
+          "critical": 1796.3482,
+          "standard": 3509.7146
+        },
+        "raw_throughput": 0.6050694444444444
+      },
+      "bursty_adversary": {
+        "score": 0.5122101334747673,
+        "slo_attainment": 0.37694444444444447,
+        "capped_throughput": 0.6137556221889054,
+        "jain_fairness": 0.6980561229793675,
+        "completed": 5895,
+        "num_requests": 14400,
+        "rejected": 8505,
+        "per_class_slo": {
+          "critical": 0.8725274725274725,
+          "sheddable": 0.998669623059867
+        },
+        "per_class_p95": {
+          "critical": 1818.8349999999998,
+          "sheddable": 7157.936399999993
+        },
+        "raw_throughput": 0.409375
+      }
+    }
+  },
+  "1.5x_class-priority-cascade": {
+    "overload_factor": 1.5,
+    "rate": 240,
+    "throughput_cap": 0.667,
+    "policy": "class-priority-cascade",
+    "avg_score": 0.6098359007008034,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6806903305600659,
+        "slo_attainment": 0.5495833333333333,
+        "capped_throughput": 0.9059012160586373,
+        "jain_fairness": 0.6706414953790399,
+        "completed": 8701,
+        "num_requests": 14400,
+        "rejected": 5699,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8775008775008775,
+          "standard": 0.9247034553893759
+        },
+        "per_class_p95": {
+          "batch": 6064.366299999992,
+          "critical": 1810.4471999999987,
+          "standard": 3501.4509999999996
+        },
+        "raw_throughput": 0.6042361111111111
+      },
+      "bursty_adversary": {
+        "score": 0.5389814708415408,
+        "slo_attainment": 0.3984027777777778,
+        "capped_throughput": 0.6492587039813427,
+        "jain_fairness": 0.7250123537912456,
+        "completed": 6236,
+        "num_requests": 14400,
+        "rejected": 8164,
+        "per_class_slo": {
+          "critical": 0.864010989010989,
+          "sheddable": 0.9984591679506933
+        },
+        "per_class_p95": {
+          "critical": 1904.6836499999995,
+          "sheddable": 7246.50575
+        },
+        "raw_throughput": 0.4330555555555556
+      }
+    }
+  },
+  "1.8x_always-admit": {
+    "overload_factor": 1.8,
+    "rate": 288,
+    "throughput_cap": 0.556,
+    "policy": "always-admit",
+    "avg_score": 0.6961390483228683,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.7651477854466282,
+        "slo_attainment": 0.5303240740740741,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.999928742047956,
+        "completed": 17280,
+        "num_requests": 17280,
+        "rejected": 0,
+        "per_class_slo": {
+          "batch": 0.992039368939065,
+          "critical": 0.15689149560117302,
+          "standard": 0.2549920988363741
+        },
+        "per_class_p95": {
+          "batch": 18819.506199999985,
+          "critical": 7664.5839,
+          "standard": 11264.437
+        },
+        "raw_throughput": 1.0
+      },
+      "bursty_adversary": {
+        "score": 0.6271303111991084,
+        "slo_attainment": 0.25428240740740743,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999455374770236,
+        "completed": 17280,
+        "num_requests": 17280,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.038461538461538464,
+          "sheddable": 0.32729244114002476
+        },
+        "per_class_p95": {
+          "critical": 34776.4025,
+          "sheddable": 42388.830949999996
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "1.8x_shed-batch-always": {
+    "overload_factor": 1.8,
+    "rate": 288,
+    "throughput_cap": 0.556,
+    "policy": "shed-batch-always",
+    "avg_score": 0.6640790107870777,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.7010277103750469,
+        "slo_attainment": 0.5354166666666667,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6665968852085676,
+        "completed": 10371,
+        "num_requests": 17280,
+        "rejected": 6909,
+        "per_class_slo": {
+          "critical": 0.8551319648093841,
+          "standard": 0.9102140497055021
+        },
+        "per_class_p95": {
+          "critical": 1957.5254499999962,
+          "standard": 3752.225
+        },
+        "raw_throughput": 0.6001736111111111
+      },
+      "bursty_adversary": {
+        "score": 0.6271303111991084,
+        "slo_attainment": 0.25428240740740743,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999455374770236,
+        "completed": 17280,
+        "num_requests": 17280,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.038461538461538464,
+          "sheddable": 0.32729244114002476
+        },
+        "per_class_p95": {
+          "critical": 34776.4025,
+          "sheddable": 42388.830949999996
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "1.8x_shed-batch-sheddable-always": {
+    "overload_factor": 1.8,
+    "rate": 288,
+    "throughput_cap": 0.556,
+    "policy": "shed-batch-sheddable-always",
+    "avg_score": 0.5269558266103851,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.7010277103750469,
+        "slo_attainment": 0.5354166666666667,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6665968852085676,
+        "completed": 10371,
+        "num_requests": 17280,
+        "rejected": 6909,
+        "per_class_slo": {
+          "critical": 0.8551319648093841,
+          "standard": 0.9102140497055021
+        },
+        "per_class_p95": {
+          "critical": 1957.5254499999962,
+          "standard": 3752.225
+        },
+        "raw_throughput": 0.6001736111111111
+      },
+      "bursty_adversary": {
+        "score": 0.35288394284572344,
+        "slo_attainment": 0.23298611111111112,
+        "capped_throughput": 0.4546362909672262,
+        "jain_fairness": 0.5,
+        "completed": 4368,
+        "num_requests": 17280,
+        "rejected": 12912,
+        "per_class_slo": {
+          "critical": 0.9217032967032966
+        },
+        "per_class_p95": {
+          "critical": 1472.12875
+        },
+        "raw_throughput": 0.25277777777777777
+      }
+    }
+  },
+  "1.8x_shed-batch-on-load": {
+    "overload_factor": 1.8,
+    "rate": 288,
+    "throughput_cap": 0.556,
+    "policy": "shed-batch-on-load",
+    "avg_score": 0.6651743106229367,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.703218310046765,
+        "slo_attainment": 0.5380208333333333,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6710394669004919,
+        "completed": 10417,
+        "num_requests": 17280,
+        "rejected": 6863,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8571847507331378,
+          "standard": 0.9090647895417325
+        },
+        "per_class_p95": {
+          "batch": 8198.16425,
+          "critical": 1937.4237,
+          "standard": 3730.109
+        },
+        "raw_throughput": 0.6028356481481482
+      },
+      "bursty_adversary": {
+        "score": 0.6271303111991084,
+        "slo_attainment": 0.25428240740740743,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999455374770236,
+        "completed": 17280,
+        "num_requests": 17280,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.038461538461538464,
+          "sheddable": 0.32729244114002476
+        },
+        "per_class_p95": {
+          "critical": 34776.4025,
+          "sheddable": 42388.830949999996
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "1.8x_shed-low-priority-on-load": {
+    "overload_factor": 1.8,
+    "rate": 288,
+    "throughput_cap": 0.556,
+    "policy": "shed-low-priority-on-load",
+    "avg_score": 0.6037456926357057,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.703218310046765,
+        "slo_attainment": 0.5380208333333333,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6710394669004919,
+        "completed": 10417,
+        "num_requests": 17280,
+        "rejected": 6863,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8571847507331378,
+          "standard": 0.9090647895417325
+        },
+        "per_class_p95": {
+          "batch": 8198.16425,
+          "critical": 1937.4237,
+          "standard": 3730.109
+        },
+        "raw_throughput": 0.6028356481481482
+      },
+      "bursty_adversary": {
+        "score": 0.5042730752246464,
+        "slo_attainment": 0.34230324074074076,
+        "capped_throughput": 0.6730032640554223,
+        "jain_fairness": 0.6561023781882462,
+        "completed": 6466,
+        "num_requests": 17280,
+        "rejected": 10814,
+        "per_class_slo": {
+          "critical": 0.8752289377289377,
+          "sheddable": 0.9971401334604385
+        },
+        "per_class_p95": {
+          "critical": 1832.0454999999997,
+          "sheddable": 7057.056399999996
+        },
+        "raw_throughput": 0.37418981481481484
+      }
+    }
+  },
+  "1.8x_class-priority-cascade": {
+    "overload_factor": 1.8,
+    "rate": 288,
+    "throughput_cap": 0.556,
+    "policy": "class-priority-cascade",
+    "avg_score": 0.6150753495297571,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.7024852505979059,
+        "slo_attainment": 0.5370949074074074,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6696889844710112,
+        "completed": 10403,
+        "num_requests": 17280,
+        "rejected": 6877,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8563049853372434,
+          "standard": 0.9092084470622037
+        },
+        "per_class_p95": {
+          "batch": 6811.971949999997,
+          "critical": 1939.059449999999,
+          "standard": 3746.75
+        },
+        "raw_throughput": 0.602025462962963
+      },
+      "bursty_adversary": {
+        "score": 0.5276654484616082,
+        "slo_attainment": 0.35908564814814814,
+        "capped_throughput": 0.7075589528377297,
+        "jain_fairness": 0.679274692681076,
+        "completed": 6798,
+        "num_requests": 17280,
+        "rejected": 10482,
+        "per_class_slo": {
+          "critical": 0.8653846153846154,
+          "sheddable": 0.9979423868312757
+        },
+        "per_class_p95": {
+          "critical": 1909.106599999999,
+          "sheddable": 7427.368949999993
+        },
+        "raw_throughput": 0.39340277777777777
+      }
+    }
+  },
+  "2.0x_always-admit": {
+    "overload_factor": 2.0,
+    "rate": 320,
+    "throughput_cap": 0.5,
+    "policy": "always-admit",
+    "avg_score": 0.6681576916901963,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.7366331378406569,
+        "slo_attainment": 0.47328125,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999625642032843,
+        "completed": 19200,
+        "num_requests": 19200,
+        "rejected": 0,
+        "per_class_slo": {
+          "batch": 0.9877731529656608,
+          "critical": 0.09155485398579322,
+          "standard": 0.1484891713137077
+        },
+        "per_class_p95": {
+          "batch": 22753.58685,
+          "critical": 13362.869,
+          "standard": 16156.736499999999
+        },
+        "raw_throughput": 1.0
+      },
+      "bursty_adversary": {
+        "score": 0.5996822455397359,
+        "slo_attainment": 0.199375,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999737276986799,
+        "completed": 19200,
+        "num_requests": 19200,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.027909861484391153,
+          "sheddable": 0.2571189862842025
+        },
+        "per_class_p95": {
+          "critical": 45628.3912,
+          "sheddable": 52229.3898
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "2.0x_shed-batch-always": {
+    "overload_factor": 2.0,
+    "rate": 320,
+    "throughput_cap": 0.5,
+    "policy": "shed-batch-always",
+    "avg_score": 0.648353370084694,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6970244946296519,
+        "slo_attainment": 0.5273958333333333,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6666328898149261,
+        "completed": 11512,
+        "num_requests": 19200,
+        "rejected": 7688,
+        "per_class_slo": {
+          "critical": 0.8437253354380426,
+          "standard": 0.8972895863052782
+        },
+        "per_class_p95": {
+          "critical": 2036.351,
+          "standard": 3929.276
+        },
+        "raw_throughput": 0.5995833333333334
+      },
+      "bursty_adversary": {
+        "score": 0.5996822455397359,
+        "slo_attainment": 0.199375,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999737276986799,
+        "completed": 19200,
+        "num_requests": 19200,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.027909861484391153,
+          "sheddable": 0.2571189862842025
+        },
+        "per_class_p95": {
+          "critical": 45628.3912,
+          "sheddable": 52229.3898
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "2.0x_shed-batch-sheddable-always": {
+    "overload_factor": 2.0,
+    "rate": 320,
+    "throughput_cap": 0.5,
+    "policy": "shed-batch-sheddable-always",
+    "avg_score": 0.5320330806481592,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6970244946296519,
+        "slo_attainment": 0.5273958333333333,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6666328898149261,
+        "completed": 11512,
+        "num_requests": 19200,
+        "rejected": 7688,
+        "per_class_slo": {
+          "critical": 0.8437253354380426,
+          "standard": 0.8972895863052782
+        },
+        "per_class_p95": {
+          "critical": 2036.351,
+          "standard": 3929.276
+        },
+        "raw_throughput": 0.5995833333333334
+      },
+      "bursty_adversary": {
+        "score": 0.3670416666666667,
+        "slo_attainment": 0.23177083333333334,
+        "capped_throughput": 0.5038541666666667,
+        "jain_fairness": 0.5,
+        "completed": 4837,
+        "num_requests": 19200,
+        "rejected": 14363,
+        "per_class_slo": {
+          "critical": 0.919991730411412
+        },
+        "per_class_p95": {
+          "critical": 1480.8429999999992
+        },
+        "raw_throughput": 0.25192708333333336
+      }
+    }
+  },
+  "2.0x_shed-batch-on-load": {
+    "overload_factor": 2.0,
+    "rate": 320,
+    "throughput_cap": 0.5,
+    "policy": "shed-batch-on-load",
+    "avg_score": 0.649078793044085,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6984753405484341,
+        "slo_attainment": 0.5286979166666667,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.670631911075504,
+        "completed": 11558,
+        "num_requests": 19200,
+        "rejected": 7642,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8397790055248618,
+          "standard": 0.8965114771106212
+        },
+        "per_class_p95": {
+          "batch": 8548.289499999999,
+          "critical": 2047.152,
+          "standard": 3931.9849999999997
+        },
+        "raw_throughput": 0.6019791666666666
+      },
+      "bursty_adversary": {
+        "score": 0.5996822455397359,
+        "slo_attainment": 0.199375,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999737276986799,
+        "completed": 19200,
+        "num_requests": 19200,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.027909861484391153,
+          "sheddable": 0.2571189862842025
+        },
+        "per_class_p95": {
+          "critical": 45628.3912,
+          "sheddable": 52229.3898
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "2.0x_shed-low-priority-on-load": {
+    "overload_factor": 2.0,
+    "rate": 320,
+    "throughput_cap": 0.5,
+    "policy": "shed-low-priority-on-load",
+    "avg_score": 0.5994975083774148,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6984753405484341,
+        "slo_attainment": 0.5286979166666667,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.670631911075504,
+        "completed": 11558,
+        "num_requests": 19200,
+        "rejected": 7642,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8397790055248618,
+          "standard": 0.8965114771106212
+        },
+        "per_class_p95": {
+          "batch": 8548.289499999999,
+          "critical": 2047.152,
+          "standard": 3931.9849999999997
+        },
+        "raw_throughput": 0.6019791666666666
+      },
+      "bursty_adversary": {
+        "score": 0.5005196762063954,
+        "slo_attainment": 0.3228125,
+        "capped_throughput": 0.7084375,
+        "jain_fairness": 0.6329108810319767,
+        "completed": 6801,
+        "num_requests": 19200,
+        "rejected": 12399,
+        "per_class_slo": {
+          "critical": 0.8759561711804837,
+          "sheddable": 0.9984725050916496
+        },
+        "per_class_p95": {
+          "critical": 1826.7736,
+          "sheddable": 7048.4014
+        },
+        "raw_throughput": 0.35421875
+      }
+    }
+  },
+  "2.0x_class-priority-cascade": {
+    "overload_factor": 2.0,
+    "rate": 320,
+    "throughput_cap": 0.5,
+    "policy": "class-priority-cascade",
+    "avg_score": 0.6095311378773214,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6981540567433203,
+        "slo_attainment": 0.5285416666666667,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6694161170499353,
+        "completed": 11544,
+        "num_requests": 19200,
+        "rejected": 7656,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8400420941857406,
+          "standard": 0.8978083257683829
+        },
+        "per_class_p95": {
+          "batch": 7204.878999999997,
+          "critical": 2034.343,
+          "standard": 3934.8909999999996
+        },
+        "raw_throughput": 0.60125
+      },
+      "bursty_adversary": {
+        "score": 0.5209082190113226,
+        "slo_attainment": 0.33619791666666665,
+        "capped_throughput": 0.7407291666666667,
+        "jain_fairness": 0.6529525533899462,
+        "completed": 7111,
+        "num_requests": 19200,
+        "rejected": 12089,
+        "per_class_slo": {
+          "critical": 0.8652057060161257,
+          "sheddable": 0.9982409850483729
+        },
+        "per_class_p95": {
+          "critical": 1884.4451999999999,
+          "sheddable": 7564.165849999997
+        },
+        "raw_throughput": 0.37036458333333333
+      }
+    }
+  },
+  "2.5x_always-admit": {
+    "overload_factor": 2.5,
+    "rate": 400,
+    "throughput_cap": 0.5,
+    "policy": "always-admit",
+    "avg_score": 0.6234369066060368,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6829989020416933,
+        "slo_attainment": 0.366,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999945102084669,
+        "completed": 24000,
+        "num_requests": 24000,
+        "rejected": 0,
+        "per_class_slo": {
+          "batch": 0.8254200146092038,
+          "critical": 0.04259761954479015,
+          "standard": 0.06958869962609057
+        },
+        "per_class_p95": {
+          "batch": 36455.839,
+          "critical": 29799.1116,
+          "standard": 31702.1635
+        },
+        "raw_throughput": 1.0
+      },
+      "bursty_adversary": {
+        "score": 0.5638749111703802,
+        "slo_attainment": 0.12775,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999995558519011,
+        "completed": 24000,
+        "num_requests": 24000,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.014152514152514152,
+          "sheddable": 0.16566633322218519
+        },
+        "per_class_p95": {
+          "critical": 71948.87925,
+          "sheddable": 77550.19625
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "2.5x_shed-batch-always": {
+    "overload_factor": 2.5,
+    "rate": 400,
+    "throughput_cap": 0.5,
+    "policy": "shed-batch-always",
+    "avg_score": 0.625145337091755,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6864157630131297,
+        "slo_attainment": 0.5061666666666667,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6666621483989814,
+        "completed": 14417,
+        "num_requests": 24000,
+        "rejected": 9583,
+        "per_class_slo": {
+          "critical": 0.800793485069952,
+          "standard": 0.8634191940174492
+        },
+        "per_class_p95": {
+          "critical": 2319.1077999999998,
+          "standard": 4454.437649999999
+        },
+        "raw_throughput": 0.6007083333333333
+      },
+      "bursty_adversary": {
+        "score": 0.5638749111703802,
+        "slo_attainment": 0.12775,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999995558519011,
+        "completed": 24000,
+        "num_requests": 24000,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.014152514152514152,
+          "sheddable": 0.16566633322218519
+        },
+        "per_class_p95": {
+          "critical": 71948.87925,
+          "sheddable": 77550.19625
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "2.5x_shed-batch-sheddable-always": {
+    "overload_factor": 2.5,
+    "rate": 400,
+    "throughput_cap": 0.5,
+    "policy": "shed-batch-sheddable-always",
+    "avg_score": 0.5256057981732315,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6864157630131297,
+        "slo_attainment": 0.5061666666666667,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6666621483989814,
+        "completed": 14417,
+        "num_requests": 24000,
+        "rejected": 9583,
+        "per_class_slo": {
+          "critical": 0.800793485069952,
+          "standard": 0.8634191940174492
+        },
+        "per_class_p95": {
+          "critical": 2319.1077999999998,
+          "standard": 4454.437649999999
+        },
+        "raw_throughput": 0.6007083333333333
+      },
+      "bursty_adversary": {
+        "score": 0.3647958333333333,
+        "slo_attainment": 0.22929166666666667,
+        "capped_throughput": 0.5005,
+        "jain_fairness": 0.5,
+        "completed": 6006,
+        "num_requests": 24000,
+        "rejected": 17994,
+        "per_class_slo": {
+          "critical": 0.9162504162504163
+        },
+        "per_class_p95": {
+          "critical": 1530.58675
+        },
+        "raw_throughput": 0.25025
+      }
+    }
+  },
+  "2.5x_shed-batch-on-load": {
+    "overload_factor": 2.5,
+    "rate": 400,
+    "throughput_cap": 0.5,
+    "policy": "shed-batch-on-load",
+    "avg_score": 0.6257699224080124,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6876649336456445,
+        "slo_attainment": 0.5075,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6695746682282229,
+        "completed": 14459,
+        "num_requests": 24000,
+        "rejected": 9541,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8010022969304657,
+          "standard": 0.8622766929788118
+        },
+        "per_class_p95": {
+          "batch": 9814.396899999985,
+          "critical": 2314.0206000000003,
+          "standard": 4450.977749999998
+        },
+        "raw_throughput": 0.6024583333333333
+      },
+      "bursty_adversary": {
+        "score": 0.5638749111703802,
+        "slo_attainment": 0.12775,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.9999995558519011,
+        "completed": 24000,
+        "num_requests": 24000,
+        "rejected": 0,
+        "per_class_slo": {
+          "critical": 0.014152514152514152,
+          "sheddable": 0.16566633322218519
+        },
+        "per_class_p95": {
+          "critical": 71948.87925,
+          "sheddable": 77550.19625
+        },
+        "raw_throughput": 1.0
+      }
+    }
+  },
+  "2.5x_shed-low-priority-on-load": {
+    "overload_factor": 2.5,
+    "rate": 400,
+    "throughput_cap": 0.5,
+    "policy": "shed-low-priority-on-load",
+    "avg_score": 0.5696280358675944,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6876649336456445,
+        "slo_attainment": 0.5075,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6695746682282229,
+        "completed": 14459,
+        "num_requests": 24000,
+        "rejected": 9541,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.8010022969304657,
+          "standard": 0.8622766929788118
+        },
+        "per_class_p95": {
+          "batch": 9814.396899999985,
+          "critical": 2314.0206000000003,
+          "standard": 4450.977749999998
+        },
+        "raw_throughput": 0.6024583333333333
+      },
+      "bursty_adversary": {
+        "score": 0.4515911380895442,
+        "slo_attainment": 0.28670833333333334,
+        "capped_throughput": 0.6349166666666667,
+        "jain_fairness": 0.5888098571143875,
+        "completed": 7619,
+        "num_requests": 24000,
+        "rejected": 16381,
+        "per_class_slo": {
+          "critical": 0.8774558774558775,
+          "sheddable": 0.9987600743955363
+        },
+        "per_class_p95": {
+          "critical": 1811.12325,
+          "sheddable": 7261.115199999999
+        },
+        "raw_throughput": 0.31745833333333334
+      }
+    }
+  },
+  "2.5x_class-priority-cascade": {
+    "overload_factor": 2.5,
+    "rate": 400,
+    "throughput_cap": 0.5,
+    "policy": "class-priority-cascade",
+    "avg_score": 0.58029843736003,
+    "workloads": {
+      "overload_mixed_slo": {
+        "score": 0.6871930263379783,
+        "slo_attainment": 0.5068333333333334,
+        "capped_throughput": 1.0,
+        "jain_fairness": 0.6688817983565583,
+        "completed": 14449,
+        "num_requests": 24000,
+        "rejected": 9551,
+        "per_class_slo": {
+          "batch": 1.0,
+          "critical": 0.7993318020463562,
+          "standard": 0.8624844204403822
+        },
+        "per_class_p95": {
+          "batch": 8050.991249999997,
+          "critical": 2305.0843999999993,
+          "standard": 4470.5186
+        },
+        "raw_throughput": 0.6020416666666667
+      },
+      "bursty_adversary": {
+        "score": 0.4734038483820815,
+        "slo_attainment": 0.3012916666666667,
+        "capped_throughput": 0.66875,
+        "jain_fairness": 0.6106650752437409,
+        "completed": 8025,
+        "num_requests": 24000,
+        "rejected": 15975,
+        "per_class_slo": {
+          "critical": 0.8682983682983683,
+          "sheddable": 0.9985141158989599
+        },
+        "per_class_p95": {
+          "critical": 1894.2725,
+          "sheddable": 7484.9327
+        },
+        "raw_throughput": 0.334375
+      }
+    }
+  }
+}

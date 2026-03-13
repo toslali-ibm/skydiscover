@@ -6,14 +6,18 @@ Evaluates evolved admission control policies by:
 2. Writing evolved admission.go to BLIS source (restored after evaluation)
 3. Building BLIS
 4. Running simulations with --results-path for per-request JSON
-5. Computing multi-objective score: slo_attainment + capped_throughput + jain_fairness
+5. Computing multi-objective score: weighted_slo + capped_throughput + jain_fairness
 
-Score = 0.50 * slo_attainment + 0.30 * capped_throughput + 0.20 * jain_fairness
-  - slo_attainment: (completed requests meeting SLO) / num_requests. Rejected = SLO miss.
+Score = 0.50 * weighted_slo + 0.30 * capped_throughput + 0.20 * jain_fairness
+  - weighted_slo: Class-weighted SLO attainment. Weights: critical=4, standard=2,
+    sheddable=1, batch=0.5. Shed-tolerant: rejected sheddable/batch are excluded
+    from the denominator (shedding them is a correct decision, not a failure).
+    Rejected critical/standard still count as SLO misses.
   - capped_throughput: min(completed/num_requests, THROUGHPUT_CAP) / THROUGHPUT_CAP.
   - jain_fairness: Jain index over per-tenant completion rates. N = total tenants in workload.
 
-Higher is better; 0 = reject-all, ~0.88 = always-admit baseline, ~0.95 = good shedding.
+Higher is better; 0 = reject-all, ~0.64 = always-admit baseline under 2x overload,
+~0.87 = good admission control with selective shedding.
 
 Experiment isolation:
 - admission.go is saved before and restored after every evaluation
@@ -159,6 +163,22 @@ def _load_workload_tenant_fractions(workload_path: Path) -> dict[str, float]:
     return dict(fractions)
 
 
+def _load_workload_class_fractions(workload_path: Path) -> dict[str, float]:
+    """Extract per-SLO-class expected request fractions from workload YAML."""
+    with open(workload_path) as f:
+        spec = yaml.safe_load(f)
+    fractions: dict[str, float] = defaultdict(float)
+    for client in spec.get("clients", []):
+        cls = client.get("slo_class", "standard")
+        frac = client.get("rate_fraction", 0.0)
+        fractions[cls] += frac
+    for cohort in spec.get("cohorts", []):
+        cls = cohort.get("slo_class", "standard")
+        frac = cohort.get("rate_fraction", 0.0)
+        fractions[cls] += frac
+    return dict(fractions)
+
+
 def _build_sim_cmd(
     inference_sim_dir: Path, policy_config_path: Path, workload_path: Path,
     model_id: str, extra_args: list[str], seed: str, results_path: str,
@@ -213,25 +233,81 @@ def print_diff(initial_code: str, current_code: str):
     logger.info(f"Diff vs initial: -{removed} / +{added} lines")
 
 
+_SLO_CLASS_WEIGHTS = {
+    "critical": 4.0,
+    "standard": 2.0,
+    "sheddable": 1.0,
+    "batch": 0.5,
+}
+
+# Classes where rejection is a correct decision (not penalized in SLO attainment)
+_SHEDDABLE_CLASSES = {"sheddable", "batch"}
+
+
 def _compute_slo_attainment(
     requests: list[dict], num_requests: int, slo_targets: dict,
+    class_fractions: dict[str, float] | None = None,
 ) -> float:
-    """Compute SLO attainment: (completed requests meeting SLO) / num_requests.
+    """Compute class-weighted, shed-tolerant SLO attainment.
 
-    Rejected requests (not in the requests list) count as SLO misses.
+    Per-class SLO attainment:
+      - For critical/standard: met / expected. Rejected = SLO miss.
+      - For sheddable/batch: met / injected. Rejected = excluded (correct decision).
+    Weighted average using _SLO_CLASS_WEIGHTS.
     """
     if num_requests <= 0:
         return 0.0
-    meeting_slo = 0
+
+    if not class_fractions:
+        # Fallback: simple SLO attainment (all classes equal, rejected = miss)
+        meeting = 0
+        for req in requests:
+            e2e_ms = req.get("e2e_ms", 0)
+            if e2e_ms <= 0:
+                continue
+            target = slo_targets.get(req.get("slo_class", "standard"), 3000)
+            if e2e_ms <= target:
+                meeting += 1
+        return meeting / num_requests
+
+    # Count injected and SLO-meeting per class
+    injected_per_class: dict[str, int] = defaultdict(int)
+    met_per_class: dict[str, int] = defaultdict(int)
     for req in requests:
+        cls = req.get("slo_class", "standard")
+        injected_per_class[cls] += 1
         e2e_ms = req.get("e2e_ms", 0)
         if e2e_ms <= 0:
-            continue  # Incomplete request (still_queued/still_running) = SLO miss
-        slo_class = req.get("slo_class", "standard")
-        target = slo_targets.get(slo_class, slo_targets.get("standard", 3000))
+            continue
+        target = slo_targets.get(cls, slo_targets.get("standard", 3000))
         if e2e_ms <= target:
-            meeting_slo += 1
-    return meeting_slo / num_requests
+            met_per_class[cls] += 1
+
+    # Expected per class from workload spec
+    expected_per_class = {cls: int(frac * num_requests)
+                         for cls, frac in class_fractions.items()}
+
+    # Weighted average of per-class SLO attainment
+    total_weight = 0.0
+    weighted_sum = 0.0
+    for cls, expected in expected_per_class.items():
+        if expected <= 0:
+            continue
+        w = _SLO_CLASS_WEIGHTS.get(cls, 1.0)
+        if cls in _SHEDDABLE_CLASSES:
+            # Shed-tolerant: denominator = injected (rejected are excluded)
+            denom = injected_per_class.get(cls, 0)
+            if denom > 0:
+                att = met_per_class.get(cls, 0) / denom
+            else:
+                att = 1.0  # All rejected = correct shedding decision
+        else:
+            # Critical/standard: denominator = expected. Rejected = SLO miss.
+            att = met_per_class.get(cls, 0) / expected
+        weighted_sum += w * att
+        total_weight += w
+
+    return weighted_sum / total_weight if total_weight > 0 else 0.0
 
 
 def _compute_capped_throughput(completed: int, num_requests: int) -> float:
@@ -357,6 +433,7 @@ def _run_workloads(
         workload_path = script_dir / "workloads" / workload_file
         num_requests = _load_num_requests(workload_path)
         tenant_fractions = _load_workload_tenant_fractions(workload_path)
+        class_fractions = _load_workload_class_fractions(workload_path)
 
         # Collect results across seeds × models
         wl_slo_attainments = []
@@ -383,7 +460,7 @@ def _run_workloads(
                 rejected = max(0, num_requests - injected)  # INV-1 derivation (for logging only)
                 requests = data.get("requests", [])
 
-                slo_att = _compute_slo_attainment(requests, num_requests, slo_targets)
+                slo_att = _compute_slo_attainment(requests, num_requests, slo_targets, class_fractions)
                 throughput = _compute_capped_throughput(completed, num_requests)
                 fairness = _compute_jain_fairness(requests, tenant_fractions, num_requests)
 

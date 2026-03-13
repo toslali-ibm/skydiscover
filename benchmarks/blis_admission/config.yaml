@@ -19,24 +19,30 @@ llm:
 
 prompt:
   system_message: |
-    You are optimizing an admission control policy for a 4-instance LLM inference cluster.
+    You are optimizing an admission control policy for a 4-instance LLM inference cluster
+    under 2x overload (320 QPS against 160 QPS capacity).
 
-    PROBLEM: Under overload, admitting everything causes queues to explode and critical
-    tenants to be starved. Your job is to selectively reject low-priority requests to
-    protect high-priority ones while maintaining throughput.
+    PROBLEM: Under heavy overload, admitting everything causes critical tenants to miss
+    their SLO targets. Your job is to selectively reject low-priority requests (batch,
+    sheddable) to protect high-priority ones (critical, standard).
 
-    GOAL: Maximize a multi-objective score:
-      - SLO attainment (50%): fraction of ALL requests (including rejected) meeting latency targets.
-        Rejected requests count as SLO misses. So rejecting critical hurts a lot.
-      - Throughput (30%): completed / total requests, capped at 77%. Shedding up to 23% of
-        requests is FREE — no throughput penalty. Only aggressive rejection (>23%) is penalized.
+    SCORING (higher is better):
+      - Weighted SLO attainment (50%): Class-weighted average of per-class SLO attainment.
+        Weights: critical=4, standard=2, sheddable=1, batch=0.5.
+        KEY: Rejected batch/sheddable are EXCLUDED from SLO calculation (correct shedding).
+        Rejected critical/standard still count as SLO misses.
+      - Throughput (30%): min(completed/total, 0.50) / 0.50. Up to 50% shedding is FREE.
       - Jain fairness (20%): equal completion rates across tenants.
 
-    BASELINE: Admit everything (always-admit). Under 1.3x overload: SLO attainment ~76%,
-    throughput at cap, fairness ~100%. Score ~0.88. You must beat this.
+    BASELINE (always-admit): Score ~0.62. Critical SLO attainment only ~25%.
+    ORACLE (shed batch on load): Score ~0.85. Critical SLO attainment ~87%.
+    You must beat the baseline. Target: 0.85+.
 
-    STRATEGY HINT: Shed low-priority classes (batch, sheddable) when cluster load is high.
-    This improves SLO attainment (critical meets targets) at zero throughput cost (under cap).
+    WINNING STRATEGY: Use totalInFlight / numInstances as load signal.
+      - When per-instance load > 15: reject batch requests.
+      - When per-instance load > 30: also reject sheddable requests.
+      - Always admit critical and standard.
+      This improves critical SLO from 25% → 87% with zero throughput penalty.
 
     AVAILABLE SIGNALS — from request:
       - inputLen: number of input tokens (cost proxy)
@@ -62,10 +68,6 @@ prompt:
 
     Return (true, "") to admit, (false, "reason") to reject.
 
-    KEY INSIGHT from routing experiments: InFlightRequests is the best load signal
-    (fresh, router-local). KVUtilization is useful as a safety filter (>90% = memory pressure).
-    Stale signals (QueueDepth) should not be primary decision factors.
-
     RULES (compilation failures waste an iteration):
     1. Only modify code between EVOLVE-BLOCK-START and EVOLVE-BLOCK-END
     2. Must be valid Go — guard all divisions to avoid divide-by-zero
@@ -73,11 +75,9 @@ prompt:
     4. Use the pre-provisioned state maps — don't add struct fields
     5. All map reads on tenantTokens/tenantRequests/classCounters are safe (pre-initialized)
 
-    EVALUATION: 2 overload workloads with heterogeneous tenants.
-      - overload_mixed_slo: sustained 1.3x overload, 3 SLO tiers (critical/standard/batch)
-      - bursty_adversary: 1 steady critical tenant + 1 extremely bursty bulk tenant
-
-    SLO TARGETS (E2E ms): calibrated from pilot data — see evaluator.
+    EVALUATION: 2 overload workloads at 2x capacity:
+      - overload_mixed_slo: sustained 2x overload, 4 tiers, 4 tenants
+      - bursty_adversary: 2 critical + 1 standard + 1 bursty batch + 1 sheddable, 5 tenants
 
 search:
   type: "adaevolve"
