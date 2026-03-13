@@ -1,0 +1,51 @@
+{
+  "id": "12c59c13-fa68-47a6-83f4-665a90f58802",
+  "generation": 3,
+  "iteration": 28,
+  "timestamp": 1773352419.963742,
+  "parent_id": "4d440a40-4d64-4c10-afed-e3463c547157",
+  "metrics": {
+    "combined_score": 0.8519190837941657,
+    "improvement_vs_baseline_pct": 36.46469283978479,
+    "slo_attainment": 0.8722586591220851,
+    "capped_throughput": 1.0,
+    "jain_fairness": 0.5789487711656158,
+    "avg_e2e_ms": 948.7687032607383,
+    "overload_mixed_slo_score": 0.8385065982869055,
+    "bursty_adversary_score": 0.8653315693014259,
+    "success_rate": 1.0,
+    "num_successful": 2,
+    "artifacts": {
+      "workload_scores": {
+        "overload_mixed_slo": {
+          "score": 0.8385065982869055,
+          "slo_attainment": 0.8699537037037037,
+          "capped_throughput": 1.0,
+          "jain_fairness": 0.5176487321752685,
+          "avg_e2e_ms": 1000.4845400800575,
+          "avg_p95_ms": 3095.8574,
+          "num_runs": 1
+        },
+        "bursty_adversary": {
+          "score": 0.8653315693014259,
+          "slo_attainment": 0.8745636145404664,
+          "capped_throughput": 1.0,
+          "jain_fairness": 0.6402488101559632,
+          "avg_e2e_ms": 897.0528664414192,
+          "avg_p95_ms": 2862.460799999999,
+          "num_runs": 1
+        }
+      },
+      "slo_targets": {
+        "batch": 33340,
+        "critical": 994,
+        "sheddable": 9948,
+        "standard": 3185
+      },
+      "throughput_cap": 0.5,
+      "baseline_score": 0.6242780209781837
+    }
+  },
+  "language": "python",
+  "saved_at": 1773353224.927447
+}

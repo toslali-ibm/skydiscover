@@ -1,0 +1,33 @@
+{
+  "seeds": [
+    "42"
+  ],
+  "combined_score": 0.6242780209781837,
+  "workload_scores": {
+    "overload_mixed_slo": {
+      "score": 0.6508199275486016,
+      "slo_attainment": 0.3016573483006196,
+      "capped_throughput": 1.0,
+      "jain_fairness": 0.9999562669914591,
+      "avg_e2e_ms": 6782.668468541667,
+      "avg_p95_ms": 15340.678599999997,
+      "num_runs": 1
+    },
+    "bursty_adversary": {
+      "score": 0.597736114407766,
+      "slo_attainment": 0.19556040310118425,
+      "capped_throughput": 1.0,
+      "jain_fairness": 0.9997795642858689,
+      "avg_e2e_ms": 11384.068336354167,
+      "avg_p95_ms": 22898.031549999985,
+      "num_runs": 1
+    }
+  },
+  "slo_targets": {
+    "batch": 33340,
+    "critical": 994,
+    "sheddable": 9948,
+    "standard": 3185
+  },
+  "throughput_cap": 0.5
+}
