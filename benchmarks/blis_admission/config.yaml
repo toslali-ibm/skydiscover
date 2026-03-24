@@ -9,7 +9,7 @@ llm:
   models:
     - name: "aws/claude-sonnet-4-5"
       weight: 0.7
-    - name: "aws/claude-opus-4-6"
+    - name: "aws/claude-opus-4-5"
       weight: 0.3
   api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
   temperature: 1.0
@@ -38,11 +38,23 @@ prompt:
     ORACLE (shed batch on load): Score ~0.85. Critical SLO attainment ~87%.
     You must beat the baseline. Target: 0.85+.
 
-    WINNING STRATEGY: Use totalInFlight / numInstances as load signal.
-      - When per-instance load > 15: reject batch requests.
-      - When per-instance load > 30: also reject sheddable requests.
-      - Always admit critical and standard.
-      This improves critical SLO from 25% → 87% with zero throughput penalty.
+    HINT: The key insight is that under overload, selectively rejecting lower-priority
+    requests can protect higher-priority ones. Consider what signals best indicate
+    current cluster load, and how to use SLO class and tenant identity to make
+    fair, priority-aware admission decisions. The available cluster state signals
+    vary in freshness — some are updated every request, others are stale by seconds.
+
+    GENERALIZATION REQUIREMENT: This policy will be deployed on a real LLM serving
+    cluster (llm-d) across different workload intensities and cluster sizes.
+    - Do NOT hardcode magic constants tuned to this specific simulation.
+    - Prefer normalized signals (e.g., per-instance ratios) over absolute counts.
+    - Prefer adaptive thresholds derived from observed cluster state (e.g.,
+      windowed averages, percentiles of recent load) over fixed numeric cutoffs.
+    - If you must use thresholds, explain clearly what cluster property they
+      represent and why that value should generalize (e.g., "this is X% of typical
+      per-instance capacity" rather than an arbitrary number).
+    - Stateful adaptation (updating thresholds based on recent observations) is
+      encouraged — the policy runs continuously and can learn from its history.
 
     AVAILABLE SIGNALS — from request:
       - inputLen: number of input tokens (cost proxy)
